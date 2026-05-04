@@ -1,0 +1,38 @@
+[
+  {
+    "drug_A_name_raw": "Naproxen",
+    "drug_B_name_raw": "Indomethacin",
+    "drug_A_role": "api",
+    "drug_B_role": "api",
+    "mole_fraction_A": 0.5,
+    "mole_fraction_B": 0.5,
+    "weight_fraction_A": 0.3917,
+    "weight_fraction_B": 0.6083,
+    "ratio_reported_as": "mole_fraction",
+    "ratio_source_quote": "1:1 molar ratio; 608.1 mg IND and 391.6 mg NAP",
+    "process_method": "quench_cooling",
+    "process_details": "Melted in aluminum dishes (volume approx. 100 mL; bottom diameter 8 cm) in a preheated oven at 168 \u00b0C for 5 min, quench cooled by pouring liquid nitrogen onto the samples. Sample dishes placed in a desiccator containing phosphorus pentoxide; liquid nitrogen poured into the dishes and allowed to evaporate before IR measurements.",
+    "induction_time_days": null,
+    "induction_time_censored": null,
+    "storage_T_C": null,
+    "storage_RH_percent": null,
+    "crystallizes_on_dsc_cooling": null,
+    "experimental_protocol": null,
+    "protocol_max_duration_days": null,
+    "Tg_K": null,
+    "Tg_uncertainty_K": null,
+    "Tg_heating_rate_K_min": null,
+    "Tm_A_K": 431.25,
+    "Tm_B_K": 435.15,
+    "pxrd_amorphous": null,
+    "detection_methods": "ATR-FTIR; XRPD upon recrystallization showed separation into crystalline single components (no co-crystal).",
+    "source_table_or_figure": "Section 2.2.1 (Sample preparation); Fig. 5b (co-amorphous NAPIND IR spectrum)",
+    "source_quote": "Amorphous samples (IND, NAP and a 1:1 molar mixture of both drugs) were prepared by melting them in aluminum dishes ... at 168 \u00b0C for 5 min and subsequent quench cooling by pouring liquid nitrogen onto the samples. Before quench cooling of the 1:1 molar ratio, a physical mixture was prepared by gently mixing 1000 mg of the drugs (1:1 molar ratio; 608.1 mg IND and 391.6 mg NAP).",
+    "notes": "Spectroscopic/computational study (ATR-FTIR + DFT B3-LYP/6-31G(d)); focus on heterodimer formation between NAP and IND in co-amorphous form. No formal stability test in this paper. Tm values from Section 2.1: NAP 158.1 \u00b0C (431.25 K), IND \u03b3 polymorph 162.0 \u00b0C (435.15 K). Reported NAP single-component Tg = 5.04 \u00b0C in cited Lobmann et al. 2011, not the mixture Tg.",
+    "needs_review": true,
+    "review_reasons": [
+      "Stabiiliuskoetta ei raportoitu (vain ATR-FTIR/DFT-tutkimus); stabiilisuusdata viitatussa Lobmann 2011 -artikkelissa (DOI 10.1021/mp2002973)",
+      "Mahdollinen duplikaatti Lobmann 2011 -korpuksen NAP+IND 1:1 mol -rivin kanssa; tarkista deduplikointi"
+    ]
+  }
+]
