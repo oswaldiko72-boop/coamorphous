@@ -161,3 +161,26 @@ class RawPair(BaseModel):
                 "on annettava, tai needs_review=True jos suhde on todella tuntematon."
             )
         return self
+
+    @model_validator(mode="after")
+    def _check_weight_fractions_sum_to_one(self) -> "RawPair":
+        """Jos molemmat weight_fraction-arvot annettu, niiden summan pitää olla 1.0.
+
+        MIKSI: weight_fraction_A + weight_fraction_B = 1.0 on määritelmäinen
+        invariantti binäärisessä seoksessa. Pyöristysvirheen takia sallitaan
+        ±0.01 toleranssi (vastaa neljän desimaalin tarkkuutta tyypillisissä
+        rounding-virheissä). Jos summa eroaa enemmän, joko paino-osuudet on
+        laskettu väärin mooliosuuksista tai lähteestä on luettu väärä arvo —
+        molemmat ovat ekstraktiovirheitä, jotka pitää nostaa esiin heti.
+        """
+        if (
+            self.weight_fraction_A is not None
+            and self.weight_fraction_B is not None
+        ):
+            total = self.weight_fraction_A + self.weight_fraction_B
+            if abs(total - 1.0) > 0.01:
+                raise ValueError(
+                    f"RawPair: weight_fraction_A + weight_fraction_B = {total:.4f}, "
+                    f"odotettu 1.0 ± 0.01. Tarkista lähteen koostumustiedot."
+                )
+        return self

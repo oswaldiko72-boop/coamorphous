@@ -376,6 +376,57 @@ class TestNonStandardProtocol:
         assert gfa == 3
         assert conf == "low"
 
+    def test_class_iii_censored_unknown_protocol(self) -> None:
+        # MIKSI: Allesø 2009:n 1:1 NAP-CIM kesti 186 vrk amorfisena 4 °C / 0 % RH
+        # silica gel -desikkaattorissa (kuiva ja kylmä = lievempi olo kuin
+        # ICH 40/75). Kokeilu loppui ilman havaittua kiteytymistä
+        # (induction_time_censored=True). Aiempi logiikka palautti
+        # (None, 'low') koska olot eivät täsmää 40/75:tä eikä 25/60:tä.
+        # Uusi haara tunnistaa sensuroidun >=180 vrk havainnon Class III:ksi
+        # mutta low confidence -painokertoimella.
+        gfa, conf = classify_baird_taylor(
+            186.0, 4.0, 0.0, False,
+            induction_time_censored=True,
+            experimental_protocol="non_standard",
+        )
+        assert gfa == 3
+        assert conf == "low"
+
+    def test_class_iii_censored_dry_extended(self) -> None:
+        # Pidempi sensuroitu koe (200 vrk) kuivassa huoneenlämmössä
+        # (25 °C / 0 % RH). Sensuroitu vahvistaa "ei kiteytymistä >= 180 vrk"
+        # -kriteerin, mutta kuiva olo on lievempi kuin 40/75 -> (3, 'low').
+        gfa, conf = classify_baird_taylor(
+            200.0, 25.0, 0.0, False,
+            induction_time_censored=True,
+            experimental_protocol="non_standard",
+        )
+        assert gfa == 3
+        assert conf == "low"
+
+    def test_class_iii_censored_unknown_conditions_no_protocol(self) -> None:
+        # Sama haara laukeaa myös ilman eksplisiittistä non_standard-protokollaa,
+        # kunhan olot ovat tuntemattomat ja induction_time_censored=True.
+        # Tämä on tärkeää, koska aiempi semantiikka palautti (None, 'low')
+        # tässä tapauksessa, ja uusi haara muuttaa sen (3, 'low'):ksi.
+        gfa, conf = classify_baird_taylor(
+            186.0, None, None, False,
+            induction_time_censored=True,
+        )
+        assert gfa == 3
+        assert conf == "low"
+
+    def test_class_iii_censored_below_180_in_unknown_conditions_unaffected(self) -> None:
+        # Sensuroitu < 180 vrk tuntemattomissa oloissa: uusi haara EI laukea.
+        # Vanha _classify_class_ii_zone-logiikka palauttaa (2, 'low').
+        # Tarkistetaan, ettei uusi haara ohita Class II -aluetta.
+        gfa, conf = classify_baird_taylor(
+            150.0, None, None, False,
+            induction_time_censored=True,
+        )
+        assert gfa == 2
+        assert conf == "low"
+
 
 class TestLegacyCompatibility:
     """Vahvistus: nykyiset kutsut ilman uusia parametreja toimivat ennallaan.

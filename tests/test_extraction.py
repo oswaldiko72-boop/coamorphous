@@ -276,6 +276,88 @@ class TestValidationFunctions:
 
 
 # -----------------------------------------------------------------------------
+# RawPair-mallin validaattorit (Pydantic-tason tarkistukset)
+# -----------------------------------------------------------------------------
+
+
+class TestRawPairValidators:
+    """Pydantic-mallin model_validator-tarkistukset.
+
+    MIKSI erillinen kerros vs. validate.py:n dict-validaattorit:
+    Pydantic-tarkistukset estävät virheellisen objektin luomisen jo
+    konstruktorissa, jolloin alavirran koodi (enrich, descriptors) saa
+    aina taatusti konsistentin RawPair-instanssin. validate.py:n funktiot
+    toimivat samanaikaisesti dict-tasolla raportoivina varmistuksina.
+    """
+
+    def _base_kwargs(self, **overrides: Any) -> dict:
+        defaults = {
+            "drug_A_name_raw": "Simvastatin",
+            "drug_B_name_raw": "Glipizide",
+            "drug_A_role": "api",
+            "drug_B_role": "api",
+            "ratio_source_quote": "1:1 mol",
+            "source_table_or_figure": "Table 3",
+            "source_quote": "Test source quote.",
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_weight_fractions_sum_to_one_passes(self) -> None:
+        # Löbmann 2012 1:1 SVS:GPZ -> w_A=0.4844, w_B=0.5156, sum=1.0
+        raw = RawPair(
+            **self._base_kwargs(
+                weight_fraction_A=0.4844,
+                weight_fraction_B=0.5156,
+            )
+        )
+        assert raw.weight_fraction_A == 0.4844
+
+    def test_weight_fractions_within_tolerance_passes(self) -> None:
+        # 0.001 ero hyväksytään (sallittu pyöristysvirhe).
+        raw = RawPair(
+            **self._base_kwargs(
+                weight_fraction_A=0.500,
+                weight_fraction_B=0.501,
+            )
+        )
+        assert raw.weight_fraction_B == 0.501
+
+    def test_weight_fractions_sum_too_large_fails(self) -> None:
+        # 0.6 + 0.5 = 1.1 -> > 0.01 toleranssi -> ValidationError.
+        with pytest.raises(ValueError, match="weight_fraction"):
+            RawPair(
+                **self._base_kwargs(
+                    weight_fraction_A=0.6,
+                    weight_fraction_B=0.5,
+                )
+            )
+
+    def test_weight_fractions_sum_too_small_fails(self) -> None:
+        # 0.3 + 0.4 = 0.7 -> kaukana 1.0:sta -> ValidationError.
+        with pytest.raises(ValueError, match="weight_fraction"):
+            RawPair(
+                **self._base_kwargs(
+                    weight_fraction_A=0.3,
+                    weight_fraction_B=0.4,
+                )
+            )
+
+    def test_only_one_weight_fraction_skips_check(self) -> None:
+        # Vain toinen weight_fraction annettu -> tarkistus ohitetaan.
+        # Mooliosuuden kautta täytetään "vähintään yksi pari" -vaatimus.
+        raw = RawPair(
+            **self._base_kwargs(
+                mole_fraction_A=0.5,
+                mole_fraction_B=0.5,
+                weight_fraction_A=0.999,  # B puuttuu -> ei summavalidointia
+            )
+        )
+        assert raw.weight_fraction_A == 0.999
+        assert raw.weight_fraction_B is None
+
+
+# -----------------------------------------------------------------------------
 # enrich
 # -----------------------------------------------------------------------------
 

@@ -41,6 +41,21 @@ Class III:sta, kun taas ``censored=False`` ja ``t = 180 vrk`` tarkoittaa,
 että kiteytyminen havaittiin tasan rajalla — eli näyte vain hädin tuskin
 *ei* täytä Class III -kriteeriä (``ei kiteytymistä >= 180 vrk``).
 
+Sensuroitu data ei-standardiprotokollissa
+------------------------------------------
+Erikoistapaus: kun ``censored=True``, ``t >= 180 vrk`` ja säilytysolot
+**eivät** vastaa ICH Q1A:n 40/75:tä tai 25/60:tä (esim. silica gel
+-desikkaattori 4 °C:ssa tai 25 °C / 0 % RH 6 kk:n ajan), näyte
+luokitellaan Class III:ksi ``label_confidence='low'``-painolla. Aiempi
+logiikka palautti (None, 'low') ja näin pudotti **stabiileimmat
+näytteet** opetusjoukon ulkopuolelle — vaikka ne ovat ML-mallin
+kannalta arvokkaimpia (vahvin todiste hyvästä GFA:sta). Matala
+luottamus heijastaa, että kuiva/kylmä säilytys on lievempi olo kuin
+ICH-kiihdytetty, joten 180 vrk näissä oloissa ei takaa, että näyte
+selviäisi 40/75:ssä yhtä pitkään. Painottamalla tällaiset rivit
+opetuksessa pienemmällä kertoimella saadaan kuitenkin signaali
+hyödynnettyä, ei kokonaan hylättyä.
+
 Toteutuksen tarkoitus
 ---------------------
 Klassifikaatio on yksi paikka, jossa virheet kertautuvat: jos sama rivi
@@ -197,7 +212,14 @@ def classify_baird_taylor(
         * ``"dsc_in_situ"`` — vain DSC-kiteytymistarkistus. Ei riittäviä
           tietoja muuhun kuin Class I:een (DSC-kiteytymisestä).
         * ``"non_standard"`` — käytetään standardilogiikkaa, mutta
-          ``label_confidence`` pakotetaan ``'low'``:ksi.
+          ``label_confidence`` pakotetaan ``'low'``:ksi. Erikoistapaus:
+          jos säilytysolot eivät ole 40/75 eivätkä 25/60 (esim. silica
+          gel -desikkaattori 4 °C / 0 % RH) ja ``induction_time_censored=True``
+          ja ``induction_time_days >= 180``, palautetaan ``(3, 'low')``.
+          Tämä säilyttää ML-mallin kannalta arvokkaimmat näytteet
+          (vahvin todiste hyvästä GFA:sta) opetusjoukossa
+          label_confidence-painokertoimella, sen sijaan että ne
+          tippuisivat (None, 'low')-tuloksen takia kokonaan ulos.
     protocol_max_duration_days : float, optional
         Kokeilun maksimikesto vuorokausina. Käytetään johdonmukaisuus-
         tarkistukseen: jos ``induction_time_censored=True``, induktioajan
@@ -236,7 +258,11 @@ def classify_baird_taylor(
        todeta korkealla luottamuksella.
     4. Muuten (None tai ich_q1a_*) käytetään standardia logiikkaa.
     5. ``non_standard`` käyttää standardilogiikkaa mutta pakottaa
-       ``label_confidence='low'``.
+       ``label_confidence='low'``. Tuntemattomissa säilytysoloissa
+       (ei 40/75 eikä 25/60), jos ``induction_time_censored=True`` ja
+       ``induction_time_days >= 180``, palautetaan ``(3, 'low')`` —
+       muuten standardilogiikka palauttaisi ``(None, 'low')`` ja
+       stabiileimmat näytteet tippuisivat opetusjoukosta pois.
 
     Borderline-vyöhyke tarkistetaan **molempien** luokkarajojen ympärillä
     Class II -alueella (7 vrk ja 180/365 vrk), koska 162 vrk:n näyte 40/75
@@ -267,10 +293,19 @@ def classify_baird_taylor(
     >>> classify_baird_taylor(162.0, 40.0, 75.0, False)
     (2, 'borderline')
 
-    Tuntemattomat olot ja pitkä induktioaika eivät riitä luokitukseen:
+    Tuntemattomat olot ja pitkä induktioaika eivät riitä luokitukseen,
+    jos sensurointitietoa ei ole:
 
     >>> classify_baird_taylor(200.0, None, None, False)
     (None, 'low')
+
+    Sensuroitu pitkä koe (>= 180 vrk) tuntemattomissa oloissa
+    (non_standard-protokolla, esim. 4 °C / 0 % RH silica gel) — paras
+    todiste GFA:sta, säilytetään opetusjoukossa low-painolla:
+
+    >>> classify_baird_taylor(186.0, 4.0, 0.0, False, induction_time_censored=True,
+    ...                       experimental_protocol="non_standard")
+    (3, 'low')
 
     Kuivasäilytys (Löbmann 2011/2013 -tyylinen): 21 vrk sensuroituna
     P2O5-desikaattorissa antaa "todennäköisesti Class III" matalalla
@@ -434,9 +469,37 @@ def _classify_standard(
             censored=censored,
         )
 
-    # Tuntemattomat säilytysolot. Class III edellyttää vahvistettuja oloja,
-    # joten >= 180 vrk tuntemattomassa palautetaan (None, 'low'). Class II:n
-    # alueella 7 <= t < 180 voidaan kuitenkin sanoa "todennäköisesti Class II".
+    # Sääntö: sensuroitu data tuntemattomissa oloissa — sallitaan Class III,
+    # jos koe kesti vähintään 180 vrk ilman havaittua kiteytymistä.
+    #
+    # MIKSI tämä haara
+    # ----------------
+    # Aiempi logiikka palautti (None, 'low') aina kun säilytysolot eivät
+    # täsmänneet ICH Q1A:n kiihdytettyihin (40/75) tai tavanomaisiin (25/60).
+    # Tämä menettää **stabiileimpien näytteiden luokituksen**: esim. Allesø 2009:n
+    # 1:1 NAP-CIM säilyi amorfisena 186 vrk:n ajan 4 °C / 0 % RH:ssa (kuiva
+    # silica gel -desikkaattori). Tällainen näyte on ML-mallin näkökulmasta
+    # **kullanarvoinen** — paras todiste vahvasta GFA:sta — mutta se merkittiin
+    # (None, 'low') ja tippui näin opetusjoukosta pois.
+    #
+    # Sensuroitu havainto >= 180 vrk on suora todiste "ei kiteytymistä >= 180
+    # vrk" -kriteeristä riippumatta tarkasta säilytyslämpötilasta tai
+    # kosteudesta. Kuiva (RH ≈ 0 %) tai kylmä (4 °C) säilytys on lievempi
+    # olosuhde kuin ICH:n kiihdytetty, joten näiden olojen 180 vrk on
+    # todennäköisesti yliarvio "todellisesta" 40/75-stabiilisuudesta — tästä
+    # syystä label_confidence pakotetaan 'low':ksi. Näin näyte säilyy
+    # opetusjoukossa label_confidence-painokertoimella, eikä tippu kokonaan
+    # ulos.
+    if (
+        censored is True
+        and induction_time_days >= CLASS_II_MAX_DAYS_ACCELERATED
+    ):
+        return 3, "low"
+
+    # Tuntemattomat säilytysolot, sensuroimaton tai lyhytaikainen havainto.
+    # Class II:n alueella 7 <= t < 180 voidaan sanoa "todennäköisesti Class II".
+    # Pidempi induktioaika ilman sensurointitietoa ei riitä Class III:n
+    # vahvistamiseen ilman olojen kontekstia.
     if CLASS_I_MAX_DAYS <= induction_time_days < CLASS_II_MAX_DAYS_ACCELERATED:
         return 2, "low"
 
