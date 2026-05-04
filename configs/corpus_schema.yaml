@@ -72,6 +72,23 @@ enums:
     - Raman
     - POM         # polarisoivan valon mikroskopia
 
+  # MIKSI experimental_protocol-enum:
+  # H1:n lähteet käyttävät hyvin eri stabiilisuusprotokollia. Baird-Taylor (2012)
+  # määrittelee Class III:n ICH Q1A -tyyppisten 40/75 (180 vrk) tai 25/60 (365 vrk)
+  # -kokeiden perusteella, mutta kirjallisuudessa esiintyy myös kuivasäilytys
+  # (P2O5/silica gel, RH ≈ 0 %), Tg+15 K -kineettisiä testejä ja pelkkä DSC-uusinta.
+  # Protokollan kirjaaminen tähän kenttään mahdollistaa, että luokituslogiikka
+  # voi soveltaa eri sääntöjä ja että label_confidence asetetaan oikein
+  # (standardit -> 'high' mahdollinen, ei-standardit -> aina 'low'/'borderline').
+  experimental_protocol:
+    - ich_q1a_accelerated      # 40 °C / 75 % RH (Baird-Taylor accelerated, ICH Q1A)
+    - ich_q1a_long_term        # 25 °C / 60 % RH (Baird-Taylor ambient, ICH Q1A)
+    - dry_short_term           # P2O5 / silica gel desiccator, RH ≈ 0 %, 7-30 vrk
+                               # (esim. Löbmann 2011/2013, lyhyen aikavälin tutkimukset)
+    - tg_plus_15K              # Tg+15 K kineettinen testi (Class I -määrittely)
+    - dsc_in_situ              # DSC-jäähdytys/uudelleenlämmitys ainoa testi
+    - non_standard             # muu, kuvaa process_details- tai notes-kentässä
+
 columns:
   # ---------------------------------------------------------------------------
   # A. IDENTITEETTI
@@ -296,6 +313,36 @@ columns:
   notes:
     dtype: string
     nullable: true
+
+  # MIKSI nämä kolme protokolla- ja olosaraketta tähän:
+  # E-kategoria sisältää lähdemetadatan, ja experimental_protocol kuvaa miten
+  # alkuperäinen julkaisu mittasi stabiiliutta. Nämä kentät vaikuttavat
+  # luokituslogiikkaan (classify_baird_taylor) ja label_confidence-arvoon,
+  # joten niiden tulee olla luettavissa samasta CSV-rivistä kuin gfa_class.
+  experimental_protocol:
+    dtype: string
+    nullable: true
+    enum: experimental_protocol
+    description: >
+      Protokolla, jolla stabiiliutta arvioitiin. Vaikuttaa luokitusrajoihin ja
+      label_confidence-arvon asettamiseen. Standardit (ich_q1a_*) saavat
+      mahdollisesti label_confidence='high'; ei-standardit (dry_short_term,
+      non_standard) saavat aina label_confidence='low' tai 'borderline'.
+  protocol_max_duration_days:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    description: >
+      Kokeilun maksimikesto vuorokausina. Tämä tunnistaa, onko kokeilu
+      tarpeeksi pitkä tukemaan Class III -luokitusta (Baird-Taylor vaatii
+      vähintään 180 vrk kiihdytetyssä, 365 vrk tavanomaisessa).
+  storage_T_K:
+    dtype: float
+    nullable: true
+    description: >
+      Säilytyslämpötila kelvineinä. Vapaaehtoinen yhdenmukaistuskenttä
+      (storage_T_C on autoritäätti). Voidaan laskea storage_T_C + 273.15
+      jälkikäteen tai jättää tyhjäksi.
 
   # ---------------------------------------------------------------------------
   # F. PARI-TASON JOHDETUT PIIRTEET (täytetään 2.4:ssä)

@@ -96,6 +96,28 @@ AMBIENT_RH_MAX: float = 65.0
 # 180 vrk * 0.10 = 18 vrk, eli 162-198 vrk on borderline II/III.
 BORDERLINE_FRACTION: float = 0.10
 
+# -----------------------------------------------------------------------------
+# Ei-standardiprotokollien kynnykset (kuiva lyhytaikainen säilytys).
+#
+# MIKSI omat vakiot:
+#   Kuivasäilytys (P2O5 / silica gel, RH ≈ 0 %) on lievempi olo kuin 25/60 tai
+#   40/75, joten näytteen kestäminen 14 vrk kuivassa ei ole yhtä vahva todiste
+#   stabiilisuudesta kuin 180 vrk kiihdytetyssä. Käytämme heuristisia rajoja:
+#
+#     * >= 14 vrk sensuroituna -> "luultavasti Class III" (low confidence)
+#     * 7-14 vrk sensuroituna -> "luultavasti Class II" (low confidence)
+#     * < 7 vrk havaittu kiteytyminen -> Class I (low confidence)
+#     * >= 7 vrk havaittu kiteytyminen -> Class II (low confidence)
+#
+# Nämä kynnykset perustuvat Löbmann 2011/2013 -tyyppisten kuivakokeiden
+# käytäntöön: tutkimukset kestävät usein 21 vrk ja oletetaan, että 2-3 viikkoa
+# kuivassa amorfisena säilyminen ennustaa pidempiaikaista stabiiliutta.
+# Kaikki dry_short_term-luokitukset saavat label_confidence='low' koska
+# ennustaminen ei-standardiprotokollasta on epävarmaa.
+# -----------------------------------------------------------------------------
+DRY_SHORT_TERM_CLASS_III_PROXY_DAYS: float = 14.0
+DRY_SHORT_TERM_CLASS_II_PROXY_DAYS: float = 7.0
+
 
 def _is_accelerated(storage_T_C: Optional[float], storage_RH_percent: Optional[float]) -> bool:
     """Onko säilytys "kiihdytetty" (40 °C / 75 % RH ICH Q1A:n mukaan)?
@@ -133,6 +155,8 @@ def classify_baird_taylor(
     storage_RH_percent: Optional[float],
     crystallizes_on_dsc_cooling: Optional[bool],
     induction_time_censored: Optional[bool] = None,
+    experimental_protocol: Optional[str] = None,
+    protocol_max_duration_days: Optional[float] = None,
 ) -> tuple[Optional[int], str]:
     """Luokittele co-amorfinen pari Baird-Taylor luokkaan I, II tai III.
 
@@ -157,6 +181,28 @@ def classify_baird_taylor(
         on **yläraja** stabiilisuusajalle, ja luokitus on Class II
         borderline (kiteytyi juuri ja juuri ennen Class III -kriteerin
         täyttymistä).
+    experimental_protocol : str, optional
+        Stabiilisuusprotokollan tunniste. Vastaa YAML:n
+        ``experimental_protocol`` -enumia. Vaikuttaa luokituslogiikkaan:
+
+        * ``"ich_q1a_accelerated"``, ``"ich_q1a_long_term"``, ``None`` —
+          käytetään standardia Baird-Taylor -logiikkaa muuttumattomana.
+          (None säilyttää aiemman, taaksepäin yhteensopivan käyttäytymisen,
+          jos protokollatieto ei ole saatavilla.)
+        * ``"dry_short_term"`` — kuivasäilytys (RH ≈ 0 %), oma kynnyssarja,
+          aina ``label_confidence='low'``.
+        * ``"tg_plus_15K"`` — Class I:n alkuperäinen kineettinen testi.
+          < 7 vrk -> (1, 'high'); muuten (2, 'low') koska tämä protokolla
+          ei voi vahvistaa Class III:a.
+        * ``"dsc_in_situ"`` — vain DSC-kiteytymistarkistus. Ei riittäviä
+          tietoja muuhun kuin Class I:een (DSC-kiteytymisestä).
+        * ``"non_standard"`` — käytetään standardilogiikkaa, mutta
+          ``label_confidence`` pakotetaan ``'low'``:ksi.
+    protocol_max_duration_days : float, optional
+        Kokeilun maksimikesto vuorokausina. Käytetään johdonmukaisuus-
+        tarkistukseen: jos ``induction_time_censored=True``, induktioajan
+        täytyy olla ``<= protocol_max_duration_days`` (muuten ekstraktio
+        on epäjohdonmukainen ja nostetaan ValueError).
 
     Returns
     -------
@@ -166,13 +212,31 @@ def classify_baird_taylor(
         jolloin Class III -kriteeriä ei voida vahvistaa).
     label_confidence : {'high', 'low', 'borderline'}
         ``'high'`` selkeissä tapauksissa, ``'borderline'`` raja-arvojen
-        ±10 % vyöhykkeellä, ``'low'`` kun datan puute pakottaa arvauksen.
+        ±10 % vyöhykkeellä, ``'low'`` kun datan puute tai ei-standardi-
+        protokolla pakottaa arvauksen.
+
+    Raises
+    ------
+    ValueError
+        Jos ``induction_time_days`` on negatiivinen, tai jos sensuroitu
+        induktioaika ylittää ``protocol_max_duration_days``:n
+        (epäjohdonmukainen ekstraktio).
 
     Notes
     -----
-    Sääntöjen järjestys on tärkeä: DSC-kiteytyminen testataan ensin, koska
-    se ohittaa muut indikaattorit. Sen jälkeen induktioaika, ja viimeisenä
-    pitkäaikaissäilytyksen kynnykset.
+    Sääntöjen järjestys on tärkeä:
+
+    1. DSC-kiteytyminen testataan ensin (ohittaa kaiken muun).
+    2. Jos ``protocol_max_duration_days`` annettu, sen ja induktioajan
+       johdonmukaisuus tarkistetaan.
+    3. Jos ``experimental_protocol`` viittaa ei-standardiin protokollaan
+       (``dry_short_term``, ``tg_plus_15K``, ``dsc_in_situ``), käytetään
+       sen omaa logiikkaa ja palautetaan aina ``label_confidence='low'``
+       paitsi tg_plus_15K + < 7 vrk -tapauksessa, jossa Class I voidaan
+       todeta korkealla luottamuksella.
+    4. Muuten (None tai ich_q1a_*) käytetään standardia logiikkaa.
+    5. ``non_standard`` käyttää standardilogiikkaa mutta pakottaa
+       ``label_confidence='low'``.
 
     Borderline-vyöhyke tarkistetaan **molempien** luokkarajojen ympärillä
     Class II -alueella (7 vrk ja 180/365 vrk), koska 162 vrk:n näyte 40/75
@@ -207,6 +271,27 @@ def classify_baird_taylor(
 
     >>> classify_baird_taylor(200.0, None, None, False)
     (None, 'low')
+
+    Kuivasäilytys (Löbmann 2011/2013 -tyylinen): 21 vrk sensuroituna
+    P2O5-desikaattorissa antaa "todennäköisesti Class III" matalalla
+    luottamuksella:
+
+    >>> classify_baird_taylor(21.0, 25.0, 0.0, False, induction_time_censored=True,
+    ...                       experimental_protocol="dry_short_term")
+    (3, 'low')
+
+    Kuivasäilytys, nopea kiteytyminen:
+
+    >>> classify_baird_taylor(3.0, 25.0, 0.0, False, induction_time_censored=False,
+    ...                       experimental_protocol="dry_short_term")
+    (1, 'low')
+
+    Tg+15 K -kineettinen testi, kiteytyminen alle viikossa = Class I:n
+    suora todiste:
+
+    >>> classify_baird_taylor(5.0, None, None, False,
+    ...                       experimental_protocol="tg_plus_15K")
+    (1, 'high')
     """
     # --- Sääntö 1: DSC-jäähdytyksellä havaittu kiteytyminen = Class I ----------
     # MIKSI ensin: DSC-kiteytyminen on suorin testi heikolle GFA:lle, eikä
@@ -215,7 +300,17 @@ def classify_baird_taylor(
         return 1, "high"
 
     # Ilman induktioaikaa emme voi luokitella muiden sääntöjen perusteella.
+    # Poikkeus: dsc_in_situ-protokollalla DSC-kiteytymisen puuttuminen ei
+    # yksinään riitä luokitukseen, joten palautetaan (None, 'low').
     if induction_time_days is None:
+        if experimental_protocol == "dsc_in_situ":
+            # crystallizes_on_dsc_cooling on jo testattu yllä; tähän tultaessa
+            # se on False tai None eikä induktioaikaa ole -> ei voida luokitella.
+            logger.debug(
+                "classify_baird_taylor: dsc_in_situ ilman kiteytymistä eikä "
+                "induktioaikaa -> ei voi luokitella."
+            )
+            return None, "low"
         logger.debug(
             "classify_baird_taylor: induktioaika puuttuu, ei voi luokitella."
         )
@@ -226,14 +321,82 @@ def classify_baird_taylor(
             f"induction_time_days ei voi olla negatiivinen, sai: {induction_time_days}"
         )
 
-    # --- Sääntö 2: < 7 vrk -> Class I -----------------------------------------
-    # Sensuroitu < 7 vrk = koe loppui ennen 7 vrk:tä ilman kiteytymistä.
-    # Stabiilisuusaika on tällöin alaraja, ei välttämättä Class I — palautetaan
-    # (None, 'low'), koska todellinen luokka voi olla I, II tai III.
+    # --- Sääntö 2: protocol_max_duration_days -johdonmukaisuus ----------------
+    # MIKSI: jos koe sensuroitiin ennen kiteytymistä, induktioajan pitää olla
+    # <= kokeen kokonaiskesto. Päinvastainen merkitsisi ekstraktiovirhettä.
+    # Tämä tarkistus on uusi turvaverkko ekstraktorille.
+    if (
+        induction_time_censored is True
+        and protocol_max_duration_days is not None
+        and induction_time_days > protocol_max_duration_days
+    ):
+        raise ValueError(
+            f"induction_time_days ({induction_time_days}) ylittää "
+            f"protocol_max_duration_days ({protocol_max_duration_days}), "
+            f"vaikka induction_time_censored=True. Sensuroitu havainto ei voi "
+            f"olla pidempi kuin kokeen kokonaiskesto."
+        )
+
+    # --- Sääntö 3: ei-standardit protokollat ---------------------------------
+    # MIKSI omat haarat: kuivasäilytys, Tg+15 K -testi ja dsc_in_situ käyttävät
+    # eri kynnyksiä kuin ICH Q1A. Standardilogiikka soveltuu vain
+    # ich_q1a_*-protokolliin tai None:lle (taaksepäin yhteensopivuus).
+    if experimental_protocol == "dry_short_term":
+        return _classify_dry_short_term(induction_time_days, induction_time_censored)
+
+    if experimental_protocol == "tg_plus_15K":
+        return _classify_tg_plus_15K(induction_time_days)
+
+    if experimental_protocol == "dsc_in_situ":
+        # crystallizes_on_dsc_cooling=True käsiteltiin jo Säännössä 1 (Class I).
+        # Tähän tultaessa se on False tai None ja meillä on induktioaika —
+        # mutta dsc_in_situ-protokolla ei oletuksena tuota induktioaika-
+        # mittausta. Jos sellainen kuitenkin on (vapaakirjattu), palautetaan
+        # konservatiivisesti (None, 'low') koska protokolla ei tue sitä.
+        logger.debug(
+            "classify_baird_taylor: dsc_in_situ-protokollalla ei DSC-kiteytymistä; "
+            "ei luokitella induktioajan perusteella."
+        )
+        return None, "low"
+
+    # --- Sääntö 4: standardi logiikka (ICH Q1A, None tai non_standard) -------
+    # Suoritetaan standardit kynnystestit ja viimeisenä alennetaan confidence
+    # 'low':ksi, jos protokolla on eksplisiittisesti non_standard.
+    gfa_class, confidence = _classify_standard(
+        induction_time_days,
+        storage_T_C,
+        storage_RH_percent,
+        induction_time_censored,
+    )
+
+    if experimental_protocol == "non_standard":
+        # Ei-standardi protokolla: pakota label_confidence='low' riippumatta
+        # standardilogiikan tuottamasta confidence-arvosta. gfa_class itsessään
+        # voi pysyä, mutta sen luotettavuus on rajoitettu.
+        return gfa_class, "low"
+
+    return gfa_class, confidence
+
+
+def _classify_standard(
+    induction_time_days: float,
+    storage_T_C: Optional[float],
+    storage_RH_percent: Optional[float],
+    censored: Optional[bool],
+) -> tuple[Optional[int], str]:
+    """Standardi Baird-Taylor -luokituslogiikka (ICH Q1A 40/75 tai 25/60).
+
+    Erotettu omaksi funktiokseen, jotta ``non_standard``-protokolla voi
+    käyttää samaa logiikkaa, mutta override-päättää lopullisen
+    label_confidence-arvon.
+    """
+    # < 7 vrk -> Class I (sensuroinnilla erikoistapaus).
     if induction_time_days < CLASS_I_MAX_DAYS:
-        if induction_time_censored is True:
+        if censored is True:
+            # Sensuroitu < 7 vrk = koe loppui ennen 7 vrk:tä ilman
+            # kiteytymistä. Stabiilisuusaika on alaraja -> ei voi luokitella.
             logger.debug(
-                "classify_baird_taylor: sensuroitu alle 7 vrk, ei voi luokitella."
+                "_classify_standard: sensuroitu alle 7 vrk, ei voi luokitella."
             )
             return None, "low"
         confidence = (
@@ -243,48 +406,116 @@ def classify_baird_taylor(
         )
         return 1, confidence
 
-    # --- Sääntö 3: pitkäaikaissäilytys ----------------------------------------
-    # Kiihdytetty (40 °C / 75 % RH).
+    # Pitkäaikaissäilytys, kiihdytetty (40 °C / 75 % RH).
     if _is_accelerated(storage_T_C, storage_RH_percent):
         threshold_iii = CLASS_II_MAX_DAYS_ACCELERATED  # 180
         if induction_time_days >= threshold_iii:
             return _classify_class_iii_zone(
-                induction_time_days, threshold_iii, induction_time_censored
+                induction_time_days, threshold_iii, censored
             )
-        # 7 <= t < 180 -> Class II.
         return _classify_class_ii_zone(
             induction_time_days,
             lower=CLASS_I_MAX_DAYS,
             upper=threshold_iii,
-            censored=induction_time_censored,
+            censored=censored,
         )
 
-    # Tavanomainen (25 °C / 60 % RH).
+    # Pitkäaikaissäilytys, tavanomainen (25 °C / 60 % RH).
     if _is_ambient(storage_T_C, storage_RH_percent):
         threshold_iii = CLASS_III_MIN_DAYS_AMBIENT  # 365
         if induction_time_days >= threshold_iii:
             return _classify_class_iii_zone(
-                induction_time_days, threshold_iii, induction_time_censored
+                induction_time_days, threshold_iii, censored
             )
-        # 7 <= t < 365 -> Class II tavanomaisessa.
         return _classify_class_ii_zone(
             induction_time_days,
             lower=CLASS_I_MAX_DAYS,
             upper=threshold_iii,
-            censored=induction_time_censored,
+            censored=censored,
         )
 
-    # --- Sääntö 4: tuntemattomat säilytysolot ---------------------------------
-    # Class III -kriteeri vaatii olojen vahvistuksen (40/75 tai 25/60). Jos
-    # oloja ei tunneta, emme voi todeta Class III:a edes pitkällä induktioajalla.
-    # Class II:n välillä 7 <= t < 180 voidaan kuitenkin sanoa "todennäköisesti
-    # Class II" matalalla luottamuksella.
+    # Tuntemattomat säilytysolot. Class III edellyttää vahvistettuja oloja,
+    # joten >= 180 vrk tuntemattomassa palautetaan (None, 'low'). Class II:n
+    # alueella 7 <= t < 180 voidaan kuitenkin sanoa "todennäköisesti Class II".
     if CLASS_I_MAX_DAYS <= induction_time_days < CLASS_II_MAX_DAYS_ACCELERATED:
         return 2, "low"
 
-    # >= 180 vrk tuntemattomissa oloissa: Class III edellyttää oloja,
-    # joita ei tunneta -> emme luokittele.
     return None, "low"
+
+
+def _classify_dry_short_term(
+    induction_time_days: float,
+    censored: Optional[bool],
+) -> tuple[Optional[int], str]:
+    """Luokitus kuivasäilytyskokeille (P2O5 / silica gel, RH ≈ 0 %).
+
+    MIKSI oma haara
+    ---------------
+    Kuivasäilytys on lievempi olo kuin ICH Q1A: matala kosteus poistaa
+    veden plastisaatiovaikutuksen, joten näytteen pitäminen amorfisena
+    2-3 viikkoa kuivassa ei ole sama todistusvoima kuin 6 kk 40/75:ssa.
+    Käytämme käytännöllisiä kynnyksiä Löbmann 2011/2013 -tyyppisille
+    21 vrk:n kokeille.
+
+    Säännöt
+    -------
+    Sensuroitu (koe loppui ilman kiteytymistä):
+      * >= 14 vrk -> Class III (low confidence) — kestänyt vähintään
+        kaksi viikkoa kuivassa, todennäköisesti hyvä GFA
+      * 7-14 vrk  -> Class II  (low confidence)
+      * < 7 vrk   -> ei voi luokitella ((None, 'low'))
+
+    Sensuroimaton (kiteytyminen havaittu):
+      * < 7 vrk   -> Class I  (low confidence) — nopea kiteytyminen
+        kuivassakin viittaa heikkoon GFA:han
+      * >= 7 vrk  -> Class II (low confidence) — kesti vähintään viikon
+
+    Sensurointitieto puuttuu (None): käsitellään kuten sensuroimaton —
+    raportoitu aika tulkitaan havaintona.
+
+    Kaikki tulokset saavat ``label_confidence='low'``, koska
+    kuivasäilytyskokeen ennustearvo standardin kiihdytetyn (40/75) tai
+    tavanomaisen (25/60) säilytyksen suhteen on epävarma.
+    """
+    if censored is True:
+        if induction_time_days >= DRY_SHORT_TERM_CLASS_III_PROXY_DAYS:
+            return 3, "low"
+        if induction_time_days >= DRY_SHORT_TERM_CLASS_II_PROXY_DAYS:
+            return 2, "low"
+        # < 7 vrk sensuroitu kuivassa: koe loppui ennen kuin Class I -kynnys
+        # edes saavutettiin. Stabiilisuusaika voi olla mikä tahansa -> emme
+        # luokittele.
+        logger.debug(
+            "_classify_dry_short_term: sensuroitu alle 7 vrk, ei voi luokitella."
+        )
+        return None, "low"
+
+    # censored is False tai None: tulkitaan raportoitu aika kiteytymishavainto.
+    if induction_time_days < DRY_SHORT_TERM_CLASS_II_PROXY_DAYS:
+        return 1, "low"
+    return 2, "low"
+
+
+def _classify_tg_plus_15K(induction_time_days: float) -> tuple[int, str]:
+    """Luokitus Tg+15 K -kineettiselle testille.
+
+    MIKSI oma haara
+    ---------------
+    Tg+15 K -testi on Class I:n alkuperäinen määrittely (Baird-Taylor 2012):
+    näyte pidetään 15 K lasittumislämpötilan yläpuolella ja katsotaan,
+    kiteytyykö se viikossa. Tämä on **suora** Class I -kriteeri, eikä
+    pidempi induktioaika tässä testissä todista Class III:a — testi vain
+    kertoo, onko aine Class I vai ei.
+
+    Säännöt
+    -------
+      * < 7 vrk   -> (1, 'high') — Class I:n suora todiste
+      * >= 7 vrk  -> (2, 'low')  — ei Class I; tarkkaa luokkaa II/III ei
+        voi päätellä tästä testistä yksinään
+    """
+    if induction_time_days < CLASS_I_MAX_DAYS:
+        return 1, "high"
+    return 2, "low"
 
 
 def _classify_class_iii_zone(

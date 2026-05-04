@@ -235,3 +235,172 @@ class TestThresholdConstants:
         assert CLASS_II_MAX_DAYS_ACCELERATED == 180.0
         assert CLASS_III_MIN_DAYS_AMBIENT == 365.0
         assert 0 < BORDERLINE_FRACTION < 0.5
+
+
+class TestDryShortTermProtocol:
+    """Kuivasäilytys (P2O5 / silica gel, RH ≈ 0 %).
+
+    MIKSI nämä testit: monet H1:n lähteet (mm. Löbmann 2011) eivät käytä
+    ICH Q1A -protokollaa, vaan kuivakokeita 4-25 °C:ssa noin 21 vrk:n ajan.
+    Tämä haara mahdollistaa tällaisten lähteiden luokituksen ja varmistaa,
+    että label_confidence pysyy 'low':na ei-standardiksi tunnistetussa
+    protokollassa.
+    """
+
+    def test_dry_short_term_censored_long(self) -> None:
+        # 21 vrk sensuroituna kuivassa: ei kiteytymistä havaittu pitkän
+        # ajan kuluessa -> todennäköisesti Class III, mutta ei-standardin
+        # protokollan vuoksi 'low' confidence.
+        gfa, conf = classify_baird_taylor(
+            21.0, 25.0, 0.0, False,
+            induction_time_censored=True,
+            experimental_protocol="dry_short_term",
+        )
+        assert gfa == 3
+        assert conf == "low"
+
+    def test_dry_short_term_censored_medium(self) -> None:
+        # 10 vrk sensuroituna kuivassa: välilukema (>= 7 mutta < 14)
+        # -> luultavasti Class II, low confidence.
+        gfa, conf = classify_baird_taylor(
+            10.0, 25.0, 0.0, False,
+            induction_time_censored=True,
+            experimental_protocol="dry_short_term",
+        )
+        assert gfa == 2
+        assert conf == "low"
+
+    def test_dry_short_term_observed_crystallization(self) -> None:
+        # 15 vrk havaittu kiteytyminen kuivassa: kesti vähintään viikon
+        # -> Class II, low confidence.
+        gfa, conf = classify_baird_taylor(
+            15.0, 25.0, 0.0, False,
+            induction_time_censored=False,
+            experimental_protocol="dry_short_term",
+        )
+        assert gfa == 2
+        assert conf == "low"
+
+    def test_dry_short_term_fast_crystallization(self) -> None:
+        # 3 vrk havaittu kiteytyminen kuivassa: nopea kiteytyminen jopa
+        # kuivassakin viittaa Class I:een.
+        gfa, conf = classify_baird_taylor(
+            3.0, 25.0, 0.0, False,
+            induction_time_censored=False,
+            experimental_protocol="dry_short_term",
+        )
+        assert gfa == 1
+        assert conf == "low"
+
+    def test_dry_short_term_censored_below_threshold_returns_none(self) -> None:
+        # Sensuroitu < 7 vrk kuivassa: koe loppui liian aikaisin
+        # -> ei voi luokitella.
+        gfa, conf = classify_baird_taylor(
+            5.0, 25.0, 0.0, False,
+            induction_time_censored=True,
+            experimental_protocol="dry_short_term",
+        )
+        assert gfa is None
+        assert conf == "low"
+
+
+class TestTgPlus15KProtocol:
+    """Tg+15 K -kineettinen testi (Class I:n alkuperäinen määrittely)."""
+
+    def test_tg_plus_15K_class_i(self) -> None:
+        # < 7 vrk Tg+15 K:ssa = Class I:n suora todiste, high confidence.
+        gfa, conf = classify_baird_taylor(
+            5.0, None, None, False,
+            experimental_protocol="tg_plus_15K",
+        )
+        assert gfa == 1
+        assert conf == "high"
+
+    def test_tg_plus_15K_not_class_i(self) -> None:
+        # >= 7 vrk Tg+15 K:ssa: ei Class I, mutta tarkkaa II/III-luokkaa
+        # ei voi päätellä tästä testistä yksin -> (2, 'low').
+        gfa, conf = classify_baird_taylor(
+            10.0, None, None, False,
+            experimental_protocol="tg_plus_15K",
+        )
+        assert gfa == 2
+        assert conf == "low"
+
+
+class TestProtocolMaxDuration:
+    """protocol_max_duration_days -johdonmukaisuustarkistus."""
+
+    def test_protocol_duration_consistency_raises(self) -> None:
+        # Sensuroitu havainto > kokeen kesto on mahdoton -> ValueError.
+        with pytest.raises(ValueError, match="protocol_max_duration_days"):
+            classify_baird_taylor(
+                30.0, 40.0, 75.0, False,
+                induction_time_censored=True,
+                protocol_max_duration_days=21.0,
+            )
+
+    def test_protocol_duration_within_bounds_passes(self) -> None:
+        # 21 vrk sensuroituna kun kokeen maksimi on 21 vrk: OK.
+        gfa, conf = classify_baird_taylor(
+            21.0, 25.0, 0.0, False,
+            induction_time_censored=True,
+            experimental_protocol="dry_short_term",
+            protocol_max_duration_days=21.0,
+        )
+        assert gfa == 3
+        assert conf == "low"
+
+    def test_protocol_duration_only_checked_when_censored(self) -> None:
+        # Sensuroimaton havainto voi periaatteessa ylittää sammuneen kokeen
+        # keston (esim. retrospektiivinen analyysi), joten tarkistus ei
+        # päde sille.
+        gfa, _ = classify_baird_taylor(
+            30.0, 40.0, 75.0, False,
+            induction_time_censored=False,
+            protocol_max_duration_days=21.0,
+        )
+        # Ei nosta — havainto sallittu.
+        assert gfa == 2
+
+
+class TestNonStandardProtocol:
+    """non_standard pakottaa label_confidence='low' standardilogiikan jälkeen."""
+
+    def test_non_standard_class_iii_downgraded_to_low(self) -> None:
+        # 365 vrk 40/75 olisi normaalisti (3, 'high'), mutta non_standard
+        # -merkki pakottaa luottamuksen alas.
+        gfa, conf = classify_baird_taylor(
+            365.0, 40.0, 75.0, False,
+            experimental_protocol="non_standard",
+        )
+        assert gfa == 3
+        assert conf == "low"
+
+
+class TestLegacyCompatibility:
+    """Vahvistus: nykyiset kutsut ilman uusia parametreja toimivat ennallaan.
+
+    Tämä testi on vakuutus regressioita vastaan: kun lisäsimme uudet
+    parametrit (experimental_protocol, protocol_max_duration_days), niiden
+    oletusarvojen täytyy säilyttää aiempi käyttäytyminen.
+    """
+
+    @pytest.mark.parametrize(
+        ("t", "T_C", "RH", "expected_gfa", "expected_conf"),
+        [
+            (3.0, 40.0, 75.0, 1, "high"),
+            (60.0, 40.0, 75.0, 2, "high"),
+            (180.0, 40.0, 75.0, 3, "borderline"),
+            (250.0, 40.0, 75.0, 3, "high"),
+            (500.0, 25.0, 60.0, 3, "high"),
+        ],
+    )
+    def test_no_protocol_param_matches_legacy(
+        self, t: float, T_C: float, RH: float,
+        expected_gfa: int, expected_conf: str,
+    ) -> None:
+        # Kutsutaan ilman experimental_protocol- ja protocol_max_duration_days
+        # -parametreja: tuloksen pitää olla sama kuin ennen muutosta.
+        gfa, conf = classify_baird_taylor(t, T_C, RH, False)
+        assert gfa == expected_gfa
+        assert conf == expected_conf
