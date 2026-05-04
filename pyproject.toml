@@ -23,6 +23,8 @@ dependencies = [
     "pandera>=0.20",
     "pyyaml>=6.0",
     "pyarrow>=14.0",
+    "requests>=2.31",
+    "pydantic>=2.5",
 ]
 
 [project.optional-dependencies]
