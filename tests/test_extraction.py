@@ -55,8 +55,11 @@ from coamorphous.extraction.validate import (
 # luettavia ja muutosten vaikutus näkyy yhdessä paikassa.
 
 NAPROXEN_CID = 156391
-NAPROXEN_INCHIKEY = "CMWTZPSULFXXJA-UHFFFAOYSA-N"
-NAPROXEN_SMILES = "CC(c1ccc2cc(OC)ccc2c1)C(=O)O"
+# PubChem palauttaa isomerisen SMILES:n (sisältää stereokemian). Naproxen
+# on (S)-enantiomeerina markkinoilla, joten @@H-merkintä @H-merkinnän
+# sijaan. InChIKey poikkeaa tästä syystä racemic-versiosta.
+NAPROXEN_INCHIKEY = "CMWTZPSULFXXJA-VIFPVBQESA-N"
+NAPROXEN_SMILES = "C[C@@H](C1=CC2=C(C=C1)C=C(C=C2)OC)C(=O)O"
 NAPROXEN_MW = 230.26
 
 INDOMETHACIN_CID = 3715
@@ -82,13 +85,17 @@ def _pubchem_cid_payload(cid: int) -> dict:
 
 
 def _pubchem_props_payload(cid: int, smiles: str, inchikey: str, mw: float) -> dict:
-    """PubChem PUG REST: ominaisuus-haku-vastaus."""
+    """PubChem PUG REST: ominaisuus-haku-vastaus.
+
+    Avain on 'SMILES' (ei 'CanonicalSMILES'); ks. pubchem_lookup-moduulin
+    docstring. Mock-vastauksen muoto vastaa nykyistä PUG REST -palautusta.
+    """
     return {
         "PropertyTable": {
             "Properties": [
                 {
                     "CID": cid,
-                    "CanonicalSMILES": smiles,
+                    "SMILES": smiles,
                     "InChIKey": inchikey,
                     "MolecularWeight": str(mw),
                 }

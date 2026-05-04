@@ -1,5 +1,10 @@
 """PubChem PUG REST -rajapinnan suorat haut.
 
+PubChem PUG REST API käyttää property-kenttänimeä 'SMILES' (ei
+'CanonicalSMILES' kuten aikaisemmin). Palautettu SMILES on isomerinen
+(sisältää stereokemian), mikä on toivottavaa lääketutkimuksessa koska
+enantiomeerit voivat erota stabiiliusominaisuuksiltaan.
+
 MIKSI tämä moduuli on olemassa
 ------------------------------
 Lähdeartikkelit käyttävät yleensä lääkeaineen triviaalinimeä ("naproxen",
@@ -201,10 +206,14 @@ def _cid_from_response(data: dict) -> Optional[int]:
 
 
 def _properties_for_cid(cid: int, timeout: float = DEFAULT_TIMEOUT_S) -> dict:
-    """Hae CID:lle CanonicalSMILES, InChIKey, MolecularWeight."""
+    """Hae CID:lle SMILES, InChIKey, MolecularWeight.
+
+    PubChem palauttaa SMILES-kentässä isomerisen (stereokemia mukaan)
+    SMILES:n. Aiempi 'CanonicalSMILES' on poistettu PUG REST:stä.
+    """
     url = (
         f"{PUBCHEM_BASE_URL}/compound/cid/{cid}/property/"
-        f"CanonicalSMILES,InChIKey,MolecularWeight/JSON"
+        f"SMILES,InChIKey,MolecularWeight/JSON"
     )
     data = _get_json(url, timeout=timeout)
     props_list = data.get("PropertyTable", {}).get("Properties", [])
@@ -229,7 +238,7 @@ def _build_lookup_result(cid: int, props: dict, cas: Optional[str] = None) -> di
 
     return {
         "cid": cid,
-        "smiles": props.get("CanonicalSMILES"),
+        "smiles": props.get("SMILES"),
         "inchikey": props.get("InChIKey"),
         "mw": mw,
         "cas": cas,
