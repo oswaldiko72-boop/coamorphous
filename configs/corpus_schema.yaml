@@ -1,0 +1,349 @@
+# =============================================================================
+# corpus_schema.yaml
+#
+# Master-CSV:n skeema co-amorfisten lääkeparien korpukselle.
+#
+# MIKSI tämä tiedosto on olemassa:
+#   - Skeema kuvataan KERRAN ihmisluettavassa muodossa, ja Pandera-skeema
+#     generoidaan tästä YAML:sta dynaamisesti (src/coamorphous/corpus/schema.py).
+#   - Tämä takaa, että dokumentaatio (ihmiselle) ja validointi (koneelle)
+#     pysyvät synkronissa: ei voi muuttaa toista unohtamatta toista.
+#   - Sarakkeet on jaettu kategorioihin (A-F), mikä helpottaa ymmärtämistä,
+#     mutta master-CSV:n sarakejärjestys seuraa tämän tiedoston järjestystä.
+#
+# Sarakejärjestys CSV:ssä = avainten järjestys columns-osiossa (Python 3.7+
+# dict säilyttää järjestyksen, ja PyYAML-safe_load palauttaa tavallisen dictin).
+#
+# TIETEELLINEN TAUSTA:
+#   Ko-amorfinen järjestelmä = kaksi (tai useampi) lääkemolekyyliä, jotka
+#   muodostavat yhteisen amorfisen faasin, jossa ei ole pitkän kantaman
+#   järjestystä (toisin kuin kiteisessä). Tällaiset järjestelmät voivat
+#   parantaa heikosti liukenevien lääkeaineiden biosaatavuutta, mutta ne
+#   ovat termodynaamisesti epästabiileja ja taipuvaisia rekristallisaatioon.
+# =============================================================================
+
+version: "1"
+description: >
+  Master-CSV:n skeema co-amorfisten lääkeparien korpukselle (H1, kohta 2.1).
+  Yksi rivi = yksi (drug_A, drug_B) -pari yhden lähteen (DOI) raportoimana.
+
+# Enumit kerätään tähän, jotta niitä voi viitata useissa sarakkeissa.
+# MIKSI enum: rajoitetut sallitut arvot estävät kirjoitusvirheet
+# (esim. "spray-drying" vs "spray_drying"), jotka muuten pirstoisivat dataa.
+enums:
+  drug_role:
+    - api          # active pharmaceutical ingredient (vaikuttava aine)
+    - coformer     # esim. aminohappo, sokeri, pieni orgaaninen molekyyli
+    - excipient    # apuaine (esim. PVP, mannitoli, polymeeri)
+  ratio_reported_as:
+    - mole_fraction
+    - weight_fraction
+    - molar_ratio
+    - weight_ratio
+  process_method:
+    - melt_quench         # sulatus + nopea jäähdytys
+    - cryo_milling        # kylmäjauhatus nestetyppilämpötilassa
+    - spray_drying        # liuoksen sumutuskuivaus
+    - solvent_evaporation # liuotinhaihdutus
+    - ball_milling        # kuulamylly (huoneenlämpö)
+    - liquid_assisted_grinding # LAG, pieni määrä liuotinta jauhatuksen apuna
+    - co_precipitation         # liuoksen saostus
+    - freeze_drying            # jäädytyskuivaus / lyofilisaatio
+    - hot_melt_extrusion       # HME, polymeerimatriisin sulatusekstruusio
+    - quench_cooling           # sulasta nopeasti jäähdytetty (ei melt-quench DSC:ssä)
+    - other
+  gfa_class:
+    # Baird-Taylor lasinmuodostumisluokitus (glass-forming ability):
+    # I  = huono, kiteytyy nopeasti DSC-jäähdytyksellä tai alle viikossa
+    # II = keskinkertainen, viikkojen-kuukausien stabiilisuus
+    # III = hyvä, stabiili kuukausista vuosiin
+    - 1
+    - 2
+    - 3
+  label_confidence:
+    - high       # selkeä luokitus, ei rajatapaus
+    - low        # epävarma datan vähäisyyden vuoksi
+    - borderline # raja-arvolla, esim. 6,5 kk induktioaika
+  detection_methods_examples: # ei strict-enum, vapaa pilkulla erotettu lista
+    - PXRD
+    - DSC
+    - SS-NMR
+    - FT-IR
+    - Raman
+    - POM         # polarisoivan valon mikroskopia
+
+columns:
+  # ---------------------------------------------------------------------------
+  # A. IDENTITEETTI
+  # MIKSI: Yksi pari per rivi täytyy pystyä viittaamaan yksiselitteisesti, ja
+  # SMILES + InChIKey antavat kemiallisen identiteetin lähteestä riippumatta.
+  # ---------------------------------------------------------------------------
+  pair_id:
+    dtype: string
+    nullable: false
+    unique: true
+    description: >
+      Globaalisti uniikki tunniste muodossa "{first_author}{year}_{n}",
+      esim. "lobmann2013_03". Yhdistää dataa lähteiden ja taulukoiden välillä.
+  entry_id:
+    dtype: string
+    nullable: false
+    description: >
+      Lähdekohtainen tunniste (esim. "Table2_row3"); auttaa palaamaan
+      alkuperäiseen julkaisuun manuaalisessa tarkastuksessa.
+
+  drug_A_name:
+    dtype: string
+    nullable: false
+  drug_B_name:
+    dtype: string
+    nullable: false
+
+  drug_A_role:
+    dtype: string
+    nullable: false
+    enum: drug_role
+  drug_B_role:
+    dtype: string
+    nullable: false
+    enum: drug_role
+
+  # MIKSI sekä original että canonical SMILES:
+  # Alkuperäinen säilyy auditointia varten (mistä se otettiin), ja kanoninen
+  # tehdään RDKit:llä (Chem.MolToSmiles), jotta sama molekyyli saa aina saman
+  # merkkijonon riippumatta siitä, miten julkaisu sen kirjoitti.
+  drug_A_smiles_original:
+    dtype: string
+    nullable: true
+  drug_B_smiles_original:
+    dtype: string
+    nullable: true
+  drug_A_smiles_canonical:
+    dtype: string
+    nullable: true
+  drug_B_smiles_canonical:
+    dtype: string
+    nullable: true
+
+  # InChIKey on 27-merkkinen hash kemiallisesta rakenteesta — tehokas avain
+  # PubChem/DrugBank-hakuihin ja duplikaattien tunnistukseen.
+  drug_A_inchikey:
+    dtype: string
+    nullable: true
+  drug_B_inchikey:
+    dtype: string
+    nullable: true
+
+  drug_A_cas:
+    dtype: string
+    nullable: true
+    description: CAS-rekisterinumero, jos raportoitu.
+  drug_B_cas:
+    dtype: string
+    nullable: true
+
+  # ---------------------------------------------------------------------------
+  # B. KOOSTUMUS JA PROSESSI
+  # MIKSI: Sama lääkepari voi olla luokassa I yhdellä molisuhteella ja
+  # luokassa III toisella; valmistustapa vaikuttaa amorfiseen rakenteeseen.
+  # ---------------------------------------------------------------------------
+  mole_fraction_A:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+  mole_fraction_B:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+  weight_fraction_A:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+  weight_fraction_B:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+  ratio_reported_as:
+    dtype: string
+    nullable: true
+    enum: ratio_reported_as
+  process_method:
+    dtype: string
+    nullable: true
+    enum: process_method
+  process_details:
+    dtype: string
+    nullable: true
+    description: Vapaamuotoinen kuvaus (esim. "200 rpm, 60 min, 5 mm steel balls").
+
+  # ---------------------------------------------------------------------------
+  # C. KOHDEMUUTTUJAT (LABEL)
+  # MIKSI: Nämä ovat ML-mallin ennustamia muuttujia. gfa_class on pääkohde.
+  # ---------------------------------------------------------------------------
+  gfa_class:
+    dtype: int
+    nullable: true
+    enum: gfa_class
+    description: Baird-Taylor luokka 1/2/3 (huono/keskinkertainen/hyvä).
+  gfa_class_label:
+    dtype: string
+    nullable: true
+    description: >
+      Ihmisluettava muoto luokasta (esim. "Class II"); helpottaa
+      visualisointeja ja raportointia, redundantti gfa_class-sarakkeen kanssa.
+  label_confidence:
+    dtype: string
+    nullable: true
+    enum: label_confidence
+
+  # MIKSI induktioaika: aika, jolloin näytteessä havaitaan kiteytymisen
+  # alkua (PXRD/DSC/Raman); tämä on Baird-Taylor luokituksen pääsyöte.
+  induction_time_days:
+    dtype: float
+    nullable: true
+    ge: 0.0
+  induction_time_censored:
+    dtype: bool
+    nullable: true
+    description: >
+      True jos koe päättyi ennen kiteytymistä (sensored / right-censored).
+      Tämä on tilastollisesti tärkeä: esim. ">365 days" ei ole sama kuin
+      "365 days".
+
+  storage_T_C:
+    dtype: float
+    nullable: true
+    description: >
+      Säilytyslämpötila celsiuksina (poikkeus: muut lämpötilat (Tg_K, Tm_K)
+      ovat kelvineinä, mutta säilytysolot raportoidaan kirjallisuudessa
+      aina celsiuksina (esim. ICH Q1A: 25/30/40 °C) ja niitä on
+      käytännöllisempi käsitellä alkuperäisessä yksikössä).
+  storage_RH_percent:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 100.0
+    description: Suhteellinen kosteus prosentteina.
+
+  # ---------------------------------------------------------------------------
+  # D. TERMODYNAAMISET MITTAUKSET
+  # ---------------------------------------------------------------------------
+  Tg_K:
+    dtype: float
+    nullable: true
+    description: Lasittumislämpötila kelvineinä (DSC mittaa, usein midpoint).
+  Tg_uncertainty_K:
+    dtype: float
+    nullable: true
+    ge: 0.0
+  Tg_heating_rate_K_min:
+    dtype: float
+    nullable: true
+    description: >
+      Lämmitysnopeus DSC-mittauksessa. Tärkeä metadata, koska Tg riippuu
+      lämmitysnopeudesta (kineettinen ilmiö, ei termodynaaminen vaiheraja).
+  Tm_A_K:
+    dtype: float
+    nullable: true
+    description: Puhtaan A:n sulamispiste (kiteinen referenssi).
+  Tm_B_K:
+    dtype: float
+    nullable: true
+  pxrd_amorphous:
+    dtype: bool
+    nullable: true
+    description: >
+      True jos PXRD vahvisti amorfisuuden (halo, ei Bragg-piikkejä). Tämä on
+      kriittinen sulkemiskriteeri: muuten voidaan luulla amorfiseksi näytettä,
+      joka onkin nanokiteinen.
+  detection_methods:
+    dtype: string
+    nullable: true
+    description: Pilkulla erotettu lista, esim. "PXRD,DSC,SS-NMR".
+
+  # ---------------------------------------------------------------------------
+  # E. LÄHDEMETADATA
+  # MIKSI: Koko korpus täytyy pystyä jäljittämään lähteeseen — toistettavuus
+  # ja vertaisarviointi vaativat sen.
+  # ---------------------------------------------------------------------------
+  source_doi:
+    dtype: string
+    nullable: false
+  source_first_author:
+    dtype: string
+    nullable: false
+  source_year:
+    dtype: int
+    nullable: false
+    ge: 1950
+    le: 2100
+  source_table_or_figure:
+    dtype: string
+    nullable: true
+    description: 'Esim. "Table 2" tai "Figure 4a".'
+  extraction_date:
+    dtype: string
+    nullable: false
+    description: ISO-päivämäärä YYYY-MM-DD ekstraktion ajankohtana.
+  extracted_by:
+    dtype: string
+    nullable: true
+    description: Ekstraktion tehnyt henkilö (initialit / nimi).
+  notes:
+    dtype: string
+    nullable: true
+
+  # ---------------------------------------------------------------------------
+  # F. PARI-TASON JOHDETUT PIIRTEET (täytetään 2.4:ssä)
+  # MIKSI nimet varataan jo nyt:
+  #   - Skeema dokumentoi sopimuksen ekstraktion ja deskriptorilaskennan välillä.
+  #   - Jos H1:ssä päätetään käyttää delta_TPSA-nimeä, niin H2/H3:n
+  #     analyysinotebookit voivat luottaa siihen.
+  #   - Kaikki nullable: true, koska ne lasketaan jälkikäteen.
+  # ---------------------------------------------------------------------------
+  delta_MW:
+    dtype: float
+    nullable: true
+    description: "abs(MW_A - MW_B), molekyylimassojen erotus (g/mol)."
+  delta_LogP:
+    dtype: float
+    nullable: true
+    description: LogP-erotus; korreloi sekoittuvuuden kanssa.
+  delta_TPSA:
+    dtype: float
+    nullable: true
+    description: Topological polar surface area -erotus.
+  delta_HBD:
+    dtype: float
+    nullable: true
+    description: Vetysidoksen luovuttajien (donors) lukumäärän erotus.
+  delta_HBA:
+    dtype: float
+    nullable: true
+    description: Vetysidoksen vastaanottajien (acceptors) lukumäärän erotus.
+  sum_MW:
+    dtype: float
+    nullable: true
+  tanimoto_ECFP4:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+    description: Tanimoto-similariteetti ECFP4-sormenjäljistä (radius 2).
+  tanimoto_ECFP6:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+    description: ECFP6 (radius 3); herkempi ympäristön rakenteelle.
+  hbond_complementarity:
+    dtype: float
+    nullable: true
+    description: >
+      Heuristinen mittari: min(HBD_A, HBA_B) + min(HBD_B, HBA_A).
+      Korkea arvo = pari voi muodostaa molemminpuolisia vetysidoksia,
+      mikä stabiloi amorfista faasia.
