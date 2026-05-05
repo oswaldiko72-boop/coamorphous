@@ -3,7 +3,7 @@
 MIKSI nämä testit ovat olemassa
 -------------------------------
 Ekstraktiopipeline yhdistää useita ulkoisia järjestelmiä (PubChem REST,
-RDKit, Pandera-skeema, classify_baird_taylor). Yksikkötestit:
+RDKit, Pandera-skeema, classify_gfa_dsc + classify_stability_*). Yksikkötestit:
 
 * varmistavat, että rajapintamuoto pysyy yhtenäisenä,
 * mockaavat PubChem:n niin että testit ajetaan offline ja ne ovat nopeita,
@@ -386,8 +386,8 @@ class TestCanonicalizeViaEnrich:
 
 
 class TestComputeClassificationViaEnrich:
-    """Varmista, että compute_classification kutsuu classify_baird_taylor
-    oikeilla parametreilla — erityisesti uudet protokolla-parametrit."""
+    """Varmista, että compute_classification kutsuu uudet luokitusfunktiot
+    oikeilla parametreilla ja palauttaa kaikki kuusi kohdesarakkeen arvoa."""
 
     def _make_raw(self, **overrides: Any) -> RawPair:
         # MIKSI: rakenna minimi-validi RawPair, jota testit voivat säätää.
@@ -406,7 +406,7 @@ class TestComputeClassificationViaEnrich:
         defaults.update(overrides)
         return RawPair(**defaults)
 
-    def test_classify_dry_short_term_class_iii(self) -> None:
+    def test_classify_dry_short_term_returns_full_dict(self) -> None:
         raw = self._make_raw(
             induction_time_days=21.0,
             induction_time_censored=True,
@@ -415,13 +415,20 @@ class TestComputeClassificationViaEnrich:
             experimental_protocol="dry_short_term",
             protocol_max_duration_days=21.0,
             crystallizes_on_dsc_cooling=False,
+            crystallizes_on_dsc_reheating=False,
         )
-        gfa, conf = compute_classification(raw)
-        assert gfa == 3
-        assert conf == "low"
+        result = compute_classification(raw)
+        # GFA-luokitus täydestä DSC-syklistä: ei kiteydy kummassakaan -> Class III.
+        assert result["gfa_class_dsc"] == 3
+        assert result["gfa_label_confidence"] == "high"
+        assert result["gfa_dsc_evidence"] == "dsc_cycle_full_reported"
+        # Stabiilisuus: 21 vrk = 3-4w bin, dry_short_term -> low.
+        assert result["stability_week_bin"] == "3-4w"
+        assert result["stability_protocol_match"] == "dry_short_term"
+        assert result["stability_label_confidence"] == "low"
 
     def test_classify_passes_protocol_through(self) -> None:
-        # ICH Q1A 40/75, 60 vrk, sensuroimaton -> Class II high.
+        # ICH Q1A 40/75, 60 vrk -> stability 2-3m bin, high confidence.
         raw = self._make_raw(
             induction_time_days=60.0,
             storage_T_C=40.0,
@@ -430,9 +437,32 @@ class TestComputeClassificationViaEnrich:
             crystallizes_on_dsc_cooling=False,
             induction_time_censored=False,
         )
-        gfa, conf = compute_classification(raw)
-        assert gfa == 2
-        assert conf == "high"
+        result = compute_classification(raw)
+        assert result["stability_week_bin"] == "2-3m"
+        assert result["stability_protocol_match"] == "ich_q1a_accelerated"
+        assert result["stability_label_confidence"] == "high"
+        # GFA: vain cooling=False, reheating=None, ei paper_states_class
+        # -> (None, 'unknown', 'dsc_thermogram_inferred').
+        assert result["gfa_class_dsc"] is None
+        assert result["gfa_label_confidence"] == "unknown"
+        assert result["gfa_dsc_evidence"] == "dsc_thermogram_inferred"
+
+    def test_paper_classification_falls_through(self) -> None:
+        # Ei DSC-tietoa, vain artikkelin eksplisiittinen maininta:
+        # luotetaan korkealla luottamuksella, evidence stated_explicitly.
+        raw = self._make_raw(
+            induction_time_days=None,
+            paper_states_gfa_class=2,
+            storage_T_C=25.0,
+            storage_RH_percent=60.0,
+            experimental_protocol="ich_q1a_long_term",
+            needs_review=True,  # induktioajan puuttumisen vuoksi
+        )
+        result = compute_classification(raw)
+        assert result["gfa_class_dsc"] == 2
+        assert result["gfa_label_confidence"] == "high"
+        assert result["gfa_dsc_evidence"] == "stated_explicitly"
+        assert result["stability_week_bin"] == "unknown"
 
 
 class TestRawPairToMasterRow:
@@ -457,6 +487,7 @@ class TestRawPairToMasterRow:
             "experimental_protocol": "dry_short_term",
             "protocol_max_duration_days": 21.0,
             "crystallizes_on_dsc_cooling": False,
+            "crystallizes_on_dsc_reheating": False,
             "pxrd_amorphous": True,
         }
         defaults.update(overrides)
@@ -474,10 +505,15 @@ class TestRawPairToMasterRow:
                    side_effect=_make_pubchem_router()):
             row = raw_pair_to_master_row(raw, meta, extracted_by="claude_code")
 
-        # Luokitus on tullut ohjelmallisesti.
-        assert row["gfa_class"] == 3
+        # GFA-luokitus täydestä DSC-syklistä (cooling=False, reheating=False).
+        assert row["gfa_class_dsc"] == 3
         assert row["gfa_class_label"] == "Class III"
-        assert row["label_confidence"] == "low"
+        assert row["gfa_label_confidence"] == "high"
+        assert row["gfa_dsc_evidence"] == "dsc_cycle_full_reported"
+        # Stabiilisuusluokitus: 21 vrk = 3-4w, dry_short_term -> low.
+        assert row["stability_week_bin"] == "3-4w"
+        assert row["stability_protocol_match"] == "dry_short_term"
+        assert row["stability_label_confidence"] == "low"
 
         # PubChem-osumat populoivat SMILES + InChIKey.
         assert row["drug_A_inchikey"] == NAPROXEN_INCHIKEY

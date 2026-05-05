@@ -53,17 +53,58 @@ enums:
     - quench_cooling           # sulasta nopeasti jäähdytetty (ei melt-quench DSC:ssä)
     - other
   gfa_class:
-    # Baird-Taylor lasinmuodostumisluokitus (glass-forming ability):
-    # I  = huono, kiteytyy nopeasti DSC-jäähdytyksellä tai alle viikossa
-    # II = keskinkertainen, viikkojen-kuukausien stabiilisuus
-    # III = hyvä, stabiili kuukausista vuosiin
+    # Baird et al. 2010 (DOI 10.1002/jps.22197) GFA-luokitus DSC-syklin
+    # heating-cooling-reheating perusteella. Tämä on **molekyylin sisäinen**
+    # ominaisuus, ei stabiilisuusmittaus säilytysoloissa:
+    # I  = kiteytyy DSC-jäähdytyksellä (huono lasinmuodostaja).
+    # II = ei kiteydy jäähdytyksellä, mutta uudelleenkiteytyy
+    #      uudelleenlämmityksellä (keskinkertainen).
+    # III = ei kiteydy jäähdytyksellä eikä uudelleenlämmityksellä (hyvä).
     - 1
     - 2
     - 3
-  label_confidence:
-    - high       # selkeä luokitus, ei rajatapaus
-    - low        # epävarma datan vähäisyyden vuoksi
-    - borderline # raja-arvolla, esim. 6,5 kk induktioaika
+  gfa_dsc_evidence:
+    # Mistä gfa_class_dsc on johdettu — tärkeä audit-tieto, koska eri
+    # todistustyypit saavat eri label_confidence-arvon. Arvot rankattu
+    # luotettavuuden mukaan korkeasta matalaan.
+    - dsc_cycle_full_reported  # täysi DSC heating-cooling-reheating-sykli raportoitu (paras)
+    - dsc_thermogram_inferred  # päätelty DSC-termogrammin piirteistä (kiteytymispiikki tms.)
+    - stated_explicitly        # artikkeli ilmoittaa luokan/käyttäytymisen suoraan tekstinä
+    - not_reported             # ei DSC- eikä eksplisiittistä tietoa saatavilla
+  gfa_label_confidence:
+    # GFA-luokituksen luotettavuus. Erotettu stability_label_confidencesta,
+    # koska DSC-pohjainen luokitus on tiukasti molekyylin ominaisuus eikä
+    # riipu säilytysoloista.
+    - high     # täysi DSC-sykli tai eksplisiittinen lähteen maininta
+    - low      # päätelty epäsuorasti (esim. yksittäinen lämmitys, ei sykliä)
+    - unknown  # gfa_class_dsc on None — luokitus ei ole määritelty
+  stability_week_bin:
+    # Stabiilisuusajan diskreetti binitys. MIKSI bin: induktioaika on hyvin
+    # vinoutuneesti jakaantunut (muutamasta päivästä useaan vuoteen), ja
+    # luokitusmallit hyötyvät kvantisoidusta kohdemuuttujasta. Censored-tieto
+    # säilytetään erikseen induction_time_censored-sarakkeessa.
+    - "<1w"
+    - "1-2w"
+    - "2-3w"
+    - "3-4w"
+    - "1-2m"
+    - "2-3m"
+    - "3-4m"
+    - "4-5m"
+    - "5-6m"
+    - "6-7m"
+    - "7-8m"
+    - "8-9m"
+    - "9-10m"
+    - "10-11m"
+    - "11-12m"
+    - ">=12m"
+    - "unknown"
+  stability_label_confidence:
+    # Stabiilisuusluokituksen luotettavuus, joka riippuu vain protokollasta:
+    # ICH Q1A -standardit -> 'high', muut -> 'low'.
+    - high
+    - low
   detection_methods_examples: # ei strict-enum, vapaa pilkulla erotettu lista
     - PXRD
     - DSC
@@ -199,23 +240,77 @@ columns:
 
   # ---------------------------------------------------------------------------
   # C. KOHDEMUUTTUJAT (LABEL)
-  # MIKSI: Nämä ovat ML-mallin ennustamia muuttujia. gfa_class on pääkohde.
+  #
+  # Kaksi erillistä ennustekohdetta:
+  #   1. gfa_class_dsc — DSC-pohjainen lasinmuodostumiskyky (intrinsinen
+  #      molekyylin ominaisuus, Baird et al. 2010).
+  #   2. stability_week_bin — säilytysolojen stabiilisuusaika binitettynä
+  #      (kontekstiriippuvainen kohde, ICH Q1A).
+  #
+  # MIKSI erotettu: aiemmin yksi gfa_class sekoitti molemmat. ML-malli oppi
+  # silloin sekoitelman, jolla oli huono yleistettävyys uusiin
+  # säilytysolosuhteisiin. Erotellut kohteet sallivat sekä per-pari -GFA-
+  # ennusteen että protokollakohtaisen stabiilisuusennusteen.
   # ---------------------------------------------------------------------------
-  gfa_class:
+  gfa_class_dsc:
     dtype: int
     nullable: true
     enum: gfa_class
-    description: Baird-Taylor luokka 1/2/3 (huono/keskinkertainen/hyvä).
+    description: >
+      Baird et al. 2010 -luokitus DSC heating-cooling-reheating syklin
+      perusteella. Class I = kiteytyy jäähdytyksellä; II = kiteytyy
+      uudelleenlämmityksellä; III = ei kiteydy. Vrt. gfa_dsc_evidence:
+      tieto pohjautuu joko raakaan DSC-syklin havaintoon tai artikkelin
+      ilmoitukseen.
   gfa_class_label:
     dtype: string
     nullable: true
     description: >
-      Ihmisluettava muoto luokasta (esim. "Class II"); helpottaa
-      visualisointeja ja raportointia, redundantti gfa_class-sarakkeen kanssa.
-  label_confidence:
+      Ihmisluettava muoto gfa_class_dsc-arvosta (esim. "Class II");
+      redundantti, mutta hyödyllinen visualisoinnissa ja raportoinnissa.
+  gfa_dsc_evidence:
     dtype: string
     nullable: true
-    enum: label_confidence
+    enum: gfa_dsc_evidence
+    description: >
+      Lähde, josta gfa_class_dsc on johdettu: dsc_cycle_full_reported
+      (paras, koko heating-cooling-reheating raportoitu), dsc_thermogram_inferred
+      (yksittäisen DSC-skaanin piirteistä päätelty), stated_explicitly
+      (artikkeli sanoo suoraan tekstinä) tai not_reported.
+  gfa_label_confidence:
+    dtype: string
+    nullable: true
+    enum: gfa_label_confidence
+    description: >
+      'high' kun täysi DSC-sykli tai eksplisiittinen lähteen maininta,
+      'low' kun päätelty epäsuorasti, 'unknown' kun gfa_class_dsc=None.
+      Erotettu stability_label_confidence-arvosta, jotta ML-mallin opetuksessa
+      voi painottaa kemiallista (GFA) ja säilyvyysvariablen erikseen.
+  stability_week_bin:
+    dtype: string
+    nullable: true
+    enum: stability_week_bin
+    description: >
+      Stabiilisuusajan diskreetti bini induction_time_days-arvosta:
+      "<1w", "1-2w", ..., "11-12m", ">=12m", "unknown". Censored-tieto
+      säilyy induction_time_censored-sarakkeessa. Tämä on stability-mallin
+      kohdemuuttuja.
+  stability_protocol_match:
+    dtype: string
+    nullable: true
+    enum: experimental_protocol
+    description: >
+      Mihin protokollatyyppiin storage_T_C/storage_RH_percent vastaa, kun
+      experimental_protocol on otettu huomioon. Käytetään
+      stability_label_confidence-arvon laskennassa.
+  stability_label_confidence:
+    dtype: string
+    nullable: true
+    enum: stability_label_confidence
+    description: >
+      'high' jos stability_protocol_match on ich_q1a_accelerated tai
+      ich_q1a_long_term, muuten 'low'. Heijastaa, miten luotettavasti
+      stability_week_bin yleistyy ICH-standardeihin.
 
   # MIKSI induktioaika: aika, jolloin näytteessä havaitaan kiteytymisen
   # alkua (PXRD/DSC/Raman); tämä on Baird-Taylor luokituksen pääsyöte.
@@ -316,18 +411,17 @@ columns:
 
   # MIKSI nämä kolme protokolla- ja olosaraketta tähän:
   # E-kategoria sisältää lähdemetadatan, ja experimental_protocol kuvaa miten
-  # alkuperäinen julkaisu mittasi stabiiliutta. Nämä kentät vaikuttavat
-  # luokituslogiikkaan (classify_baird_taylor) ja label_confidence-arvoon,
-  # joten niiden tulee olla luettavissa samasta CSV-rivistä kuin gfa_class.
+  # alkuperäinen julkaisu mittasi stabiiliutta. Tämä syöte vaikuttaa
+  # stability_protocol_match- ja stability_label_confidence -laskentaan
+  # (src/coamorphous/corpus/classify.py).
   experimental_protocol:
     dtype: string
     nullable: true
     enum: experimental_protocol
     description: >
-      Protokolla, jolla stabiiliutta arvioitiin. Vaikuttaa luokitusrajoihin ja
-      label_confidence-arvon asettamiseen. Standardit (ich_q1a_*) saavat
-      mahdollisesti label_confidence='high'; ei-standardit (dry_short_term,
-      non_standard) saavat aina label_confidence='low' tai 'borderline'.
+      Artikkelin raportoima protokollatunniste tai None. Käytetään
+      stability_protocol_match-laskennassa: jos eksplisiittinen, otetaan
+      sellaisenaan; muutoin pääteltävä storage_T_C/storage_RH_percent-arvoista.
   protocol_max_duration_days:
     dtype: float
     nullable: true

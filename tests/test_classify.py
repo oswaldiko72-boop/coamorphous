@@ -1,16 +1,16 @@
-"""Yksikkötestit Baird-Taylor luokitukselle.
+"""Yksikkötestit GFA- ja stabiilisuusluokitukselle.
 
 MIKSI nämä testit ovat olemassa
 -------------------------------
-Luokitusvirhe näkyy suoraan ML-mallin opetusdatassa. Testaamme:
+Luokitusvirhe näkyy suoraan ML-mallin opetusdatassa. Aiemmin yksittäinen
+``classify_baird_taylor``-funktio sekoitti GFA:n ja stabiilisuuden, mikä
+teki testeistä vaikealukuisia ja peitti, kumpi ilmiö milläkin testillä
+varmistettiin. Nyt testaamme kahdessa erillisessä polussa:
 
-* selvät tapaukset (Class I/II/III)
-* DSC-jäähdytyksen kiteytyminen pakottaa Class I:n
-* raja-arvot (7 vrk, 180 vrk, 365 vrk) ja niiden borderline-vyöhykkeet
-  *molemmissa* suunnissa (162 vrk on borderline yhtä lailla kuin 195 vrk)
-* sensuroinnin (``induction_time_censored``) vaikutus rajalla
-* puuttuva data palauttaa ``None`` luokan
-* negatiivinen induktioaika nostaa virheen (sanity check)
+* ``classify_gfa_dsc`` — Baird et al. 2010 -luokitus DSC-syklistä.
+* ``classify_stability_week_bin`` — induction_time_days -arvon binitys.
+* ``classify_stability_protocol`` — säilytysolojen tunnistus.
+* ``classify_stability_label_confidence`` — protokollasta johdettu luottamus.
 """
 
 from __future__ import annotations
@@ -18,440 +18,292 @@ from __future__ import annotations
 import pytest
 
 from coamorphous.corpus.classify import (
-    BORDERLINE_FRACTION,
-    CLASS_I_MAX_DAYS,
-    CLASS_II_MAX_DAYS_ACCELERATED,
-    CLASS_III_MIN_DAYS_AMBIENT,
-    classify_baird_taylor,
+    WEEK_BIN_OVER_YEAR,
+    WEEK_BIN_UNKNOWN,
+    classify_gfa_dsc,
+    classify_stability_label_confidence,
+    classify_stability_protocol,
+    classify_stability_week_bin,
 )
 
 
-class TestDSCRule:
-    """DSC-jäähdytyksen kiteytyminen on ehdoton Class I -indikaattori."""
+# =============================================================================
+# GFA-luokitus (DSC-pohjainen)
+# =============================================================================
 
-    def test_dsc_crystallizes_forces_class_i(self) -> None:
-        gfa, conf = classify_baird_taylor(
-            induction_time_days=200.0,  # pitkä, mutta ei merkkaa
-            storage_T_C=40.0,
-            storage_RH_percent=75.0,
-            crystallizes_on_dsc_cooling=True,
+
+class TestClassifyGfaDsc:
+    """Baird et al. 2010 -luokitus DSC heating-cooling-reheating syklistä."""
+
+    def test_class_i_crystallizes_on_cooling_full_cycle(self) -> None:
+        # Kiteytyy jäähdytyksellä, uudelleenlämmityskin raportoitu (kiteytyy):
+        # Class I high, evidence dsc_cycle_full_reported.
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=True,
+            crystallizes_on_reheating=True,
         )
         assert gfa == 1
         assert conf == "high"
+        assert evidence == "dsc_cycle_full_reported"
 
-
-class TestClassI:
-    """< 7 vrk = Class I."""
-
-    def test_well_below_threshold(self) -> None:
-        gfa, conf = classify_baird_taylor(3.0, 40.0, 75.0, False)
+    def test_class_i_cooling_only(self) -> None:
+        # Vain jäähdytyssykli raportoitu, kiteytyy: Class I high,
+        # evidence dsc_thermogram_inferred (yksittäisen termogrammin piirre).
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=True,
+            crystallizes_on_reheating=None,
+        )
         assert gfa == 1
         assert conf == "high"
+        assert evidence == "dsc_thermogram_inferred"
 
-    def test_just_below_threshold_is_borderline(self) -> None:
-        # 6.5 vrk on borderline (7 - 0.7 = 6.3, eli rajan 7 ympärillä ±10%).
-        gfa, conf = classify_baird_taylor(6.5, 40.0, 75.0, False)
-        assert gfa == 1
-        assert conf == "borderline"
-
-
-class TestClassIIAccelerated:
-    """7-180 vrk kiihdytetyssä (40 °C / 75 % RH) = Class II."""
-
-    def test_middle_of_range(self) -> None:
-        gfa, conf = classify_baird_taylor(60.0, 40.0, 75.0, False)
+    def test_class_ii_no_cooling_yes_reheating(self) -> None:
+        # Ei kiteydy jäähdytyksellä, kiteytyy uudelleenlämmityksessä: Class II.
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=False,
+            crystallizes_on_reheating=True,
+        )
         assert gfa == 2
         assert conf == "high"
+        assert evidence == "dsc_cycle_full_reported"
 
-    def test_just_above_class_i_threshold_is_borderline(self) -> None:
-        # 7.5 vrk on borderline 7 vrk:n rajalla.
-        gfa, conf = classify_baird_taylor(7.5, 40.0, 75.0, False)
-        assert gfa == 2
-        assert conf == "borderline"
-
-    def test_162_days_is_borderline_near_class_iii_threshold(self) -> None:
-        # MIKSI tämä testi: 162 vrk = 180 - 18 on tasan ±10 % alapuolella
-        # Class III -kynnystä. Aiempi koodi olisi luokitellut tämän
-        # (2, 'high'), koska borderline-tarkistus tehtiin vain Class I -rajan
-        # ympärillä. Korjattu logiikka tunnistaa molemmat rajat.
-        gfa, conf = classify_baird_taylor(162.0, 40.0, 75.0, False)
-        assert gfa == 2
-        assert conf == "borderline"
-
-
-class TestClassIIIAccelerated:
-    """>= 180 vrk kiihdytetyssä = Class III (sensurointiriippuvainen rajalla)."""
-
-    def test_well_above_threshold(self) -> None:
-        gfa, conf = classify_baird_taylor(365.0, 40.0, 75.0, False)
-        assert gfa == 3
-        assert conf == "high"
-
-    def test_exactly_at_threshold_default_censoring_is_class_iii_borderline(self) -> None:
-        # Sensurointitietoa ei anneta (None) -> säilytetään aiempi semantiikka:
-        # 180 vrk on Class III borderline.
-        gfa, conf = classify_baird_taylor(180.0, 40.0, 75.0, False)
-        assert gfa == 3
-        assert conf == "borderline"
-
-    def test_six_and_half_months_borderline(self) -> None:
-        # 6.5 kk = 195 vrk on borderline rajalla 180 (180*1.10 = 198).
-        gfa, conf = classify_baird_taylor(195.0, 40.0, 75.0, False)
-        assert gfa == 3
-        assert conf == "borderline"
-
-    def test_well_clear_of_borderline(self) -> None:
-        # 250 vrk on selvästi borderline-vyöhykkeen ulkopuolella (180*1.10=198).
-        gfa, conf = classify_baird_taylor(250.0, 40.0, 75.0, False)
-        assert gfa == 3
-        assert conf == "high"
-
-    def test_180_days_censored_true_is_class_iii_high(self) -> None:
-        # MIKSI: censored=True ja t = 180 vrk tarkoittaa, että koe kesti
-        # tasan 180 vrk *ilman* havaittua kiteytymistä. Tämä on suora
-        # todiste Class III -kriteeristä ("ei kiteytymistä >= 180 vrk")
-        # -> high confidence rajan tarkkuudesta huolimatta.
-        gfa, conf = classify_baird_taylor(
-            180.0, 40.0, 75.0, False, induction_time_censored=True
+    def test_class_iii_no_cooling_no_reheating(self) -> None:
+        # Ei kiteydy kummassakaan syklissä: Class III high.
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=False,
+            crystallizes_on_reheating=False,
         )
         assert gfa == 3
         assert conf == "high"
+        assert evidence == "dsc_cycle_full_reported"
 
-    def test_180_days_censored_false_is_class_ii_borderline(self) -> None:
-        # PERUSTELU: censored=False ja t = 180 vrk tarkoittaa, että
-        # kiteytyminen *havaittiin* tasan 180 vrk:n kohdalla. Class III
-        # vaatii "ei kiteytymistä >= 180 vrk", joten kiteytyminen rajalla
-        # rikkoo kriteerin "juuri ja juuri" -> Class II borderline.
-        # (Vaihtoehto (3, 'borderline') olisi puolustettavissa, mutta
-        # valitsemme tiukan tulkinnan, joka noudattaa kriteerin kirjainta.)
-        gfa, conf = classify_baird_taylor(
-            180.0, 40.0, 75.0, False, induction_time_censored=False
+    def test_cooling_only_no_crystallization_uses_paper_class(self) -> None:
+        # cooling=False, reheating=None: ei voi erottaa II/III ilman
+        # uudelleenlämmityksen havaintoa. Käytetään paper_states_class
+        # täydentävänä signaalina (matala luottamus, dsc_thermogram_inferred).
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=False,
+            crystallizes_on_reheating=None,
+            paper_states_class=3,
         )
-        assert gfa == 2
-        assert conf == "borderline"
-
-
-class TestClassIIIAmbient:
-    """>= 365 vrk tavanomaisessa (25 °C / 60 % RH) = Class III."""
-
-    def test_well_above_threshold(self) -> None:
-        gfa, conf = classify_baird_taylor(500.0, 25.0, 60.0, False)
         assert gfa == 3
-        assert conf == "high"
-
-    def test_exactly_at_threshold_is_borderline(self) -> None:
-        gfa, conf = classify_baird_taylor(365.0, 25.0, 60.0, False)
-        assert gfa == 3
-        assert conf == "borderline"
-
-    def test_below_threshold_in_ambient_is_class_ii(self) -> None:
-        # Tavanomaisessa 200 vrk ei riitä Class III:ksi (eri sääntö kuin kiihdytetyssä).
-        gfa, conf = classify_baird_taylor(200.0, 25.0, 60.0, False)
-        assert gfa == 2
-
-
-class TestUnknownConditions:
-    """Tuntemattomat säilytysolot -> 'low' confidence tai (None, 'low')."""
-
-    def test_no_storage_info_class_ii_range_returns_low(self) -> None:
-        gfa, conf = classify_baird_taylor(60.0, None, None, False)
-        assert gfa == 2
         assert conf == "low"
+        assert evidence == "dsc_thermogram_inferred"
 
-    def test_long_induction_unknown_conditions_returns_none(self) -> None:
-        # MIKSI: Class III -kriteeri vaatii oloista vahvistuksen (40/75 tai
-        # 25/60). 200 vrk ilman olotietoa ei voi todeta Class III:ksi -
-        # parempi palauttaa (None, 'low') kuin arvata Class II.
-        gfa, conf = classify_baird_taylor(200.0, None, None, False)
+    def test_cooling_only_no_crystallization_no_paper_class(self) -> None:
+        # cooling=False, reheating=None, paper_states_class=None:
+        # palautetaan None / unknown — luokkaa ei voi määrittää.
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=False,
+            crystallizes_on_reheating=None,
+            paper_states_class=None,
+        )
         assert gfa is None
-        assert conf == "low"
+        assert conf == "unknown"
+        assert evidence == "dsc_thermogram_inferred"
 
+    def test_paper_classification_only(self) -> None:
+        # Ei DSC-tietoa, vain artikkelin eksplisiittinen maininta:
+        # luotetaan tähän korkealla confidencellä, evidence stated_explicitly.
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=None,
+            crystallizes_on_reheating=None,
+            paper_states_class=2,
+        )
+        assert gfa == 2
+        assert conf == "high"
+        assert evidence == "stated_explicitly"
 
-class TestMissingData:
-    def test_no_induction_time_no_dsc_returns_none(self) -> None:
-        gfa, conf = classify_baird_taylor(None, 40.0, 75.0, False)
+    def test_no_data_returns_none(self) -> None:
+        # Ei mitään tietoa: (None, 'unknown', 'not_reported').
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=None,
+            crystallizes_on_reheating=None,
+            paper_states_class=None,
+        )
         assert gfa is None
-        assert conf == "low"
+        assert conf == "unknown"
+        assert evidence == "not_reported"
 
-    def test_negative_induction_time_raises(self) -> None:
+    def test_class_i_overrides_paper_states(self) -> None:
+        # Suora DSC-havainto ohittaa artikkelin ilmoituksen, jos ne ovat
+        # ristiriidassa.
+        gfa, conf, evidence = classify_gfa_dsc(
+            crystallizes_on_cooling=True,
+            crystallizes_on_reheating=True,
+            paper_states_class=3,  # ristiriita: artikkeli väittää Class III
+        )
+        assert gfa == 1
+        assert conf == "high"
+        assert evidence == "dsc_cycle_full_reported"
+
+
+# =============================================================================
+# Stabiilisuusajan binitys
+# =============================================================================
+
+
+class TestClassifyStabilityWeekBin:
+    """induction_time_days -> diskreetti viikko-/kuukausibini."""
+
+    @pytest.mark.parametrize(
+        ("days", "expected"),
+        [
+            (0.0, "<1w"),
+            (3.0, "<1w"),
+            (6.99, "<1w"),
+            (7.0, "1-2w"),
+            (10.0, "1-2w"),
+            (13.99, "1-2w"),
+            (14.0, "2-3w"),
+            (21.0, "3-4w"),
+            (27.99, "3-4w"),
+            (28.0, "1-2m"),
+            (45.0, "1-2m"),
+            (60.0, "2-3m"),
+            (75.0, "2-3m"),
+            (90.0, "3-4m"),
+            (120.0, "4-5m"),
+            (150.0, "5-6m"),
+            (180.0, "6-7m"),
+            (186.0, "6-7m"),
+            (210.0, "7-8m"),
+            (240.0, "8-9m"),
+            (270.0, "9-10m"),
+            (300.0, "10-11m"),
+            (335.0, "11-12m"),
+            (364.99, "11-12m"),
+        ],
+    )
+    def test_bin_assignment(self, days: float, expected: str) -> None:
+        assert classify_stability_week_bin(days) == expected
+
+    def test_at_or_above_year_returns_over_year(self) -> None:
+        assert classify_stability_week_bin(365.0) == WEEK_BIN_OVER_YEAR
+        assert classify_stability_week_bin(500.0) == WEEK_BIN_OVER_YEAR
+        assert classify_stability_week_bin(2000.0) == WEEK_BIN_OVER_YEAR
+
+    def test_none_returns_unknown(self) -> None:
+        assert classify_stability_week_bin(None) == WEEK_BIN_UNKNOWN
+
+    def test_negative_raises(self) -> None:
         with pytest.raises(ValueError):
-            classify_baird_taylor(-1.0, 40.0, 75.0, False)
+            classify_stability_week_bin(-1.0)
 
-
-class TestCensoringEdgeCases:
-    """Sensurointi vaikuttaa myös muissa kohdissa kuin 180/365 rajalla."""
-
-    def test_censored_below_class_i_threshold_returns_none(self) -> None:
-        # Sensuroitu < 7 vrk: koe loppui ennen Class I -rajaa ilman
-        # kiteytymistä -> stabiilisuusaika voi olla mikä tahansa -> ei luokita.
-        gfa, conf = classify_baird_taylor(
-            5.0, 40.0, 75.0, False, induction_time_censored=True
+    def test_censored_does_not_change_bin(self) -> None:
+        # Censored-status pidetään erillisessä CSV-sarakkeessa eikä se
+        # vaikuta itse bin-arvoon.
+        assert (
+            classify_stability_week_bin(186.0, induction_time_censored=True)
+            == "6-7m"
         )
-        assert gfa is None
-        assert conf == "low"
-
-    def test_censored_in_class_ii_range_lowers_confidence(self) -> None:
-        # Sensuroitu 60 vrk: stabiilisuus *vähintään* 60 vrk. Voi olla
-        # Class II tai Class III -> Class II low confidence.
-        gfa, conf = classify_baird_taylor(
-            60.0, 40.0, 75.0, False, induction_time_censored=True
+        assert (
+            classify_stability_week_bin(186.0, induction_time_censored=False)
+            == "6-7m"
         )
-        assert gfa == 2
-        assert conf == "low"
 
 
-class TestBackwardCompatibility:
-    """MIKSI: varmistetaan, että vanhat kutsut (ilman censored-parametria)
-    palauttavat saman tuloksen kuin ennen muutosta. Default = None säilyttää
-    aiemman semantiikan."""
-
-    @pytest.mark.parametrize(
-        ("t", "expected_gfa", "expected_conf"),
-        [
-            (3.0, 1, "high"),
-            (6.5, 1, "borderline"),
-            (60.0, 2, "high"),
-            (7.5, 2, "borderline"),
-            (180.0, 3, "borderline"),
-            (195.0, 3, "borderline"),
-            (250.0, 3, "high"),
-            (365.0, 3, "high"),
-        ],
-    )
-    def test_default_censoring_matches_legacy(
-        self, t: float, expected_gfa: int, expected_conf: str
-    ) -> None:
-        # Kutsutaan ilman induction_time_censored-parametria.
-        gfa, conf = classify_baird_taylor(t, 40.0, 75.0, False)
-        assert gfa == expected_gfa
-        assert conf == expected_conf
+# =============================================================================
+# Stabiilisuusprotokollan tunnistus
+# =============================================================================
 
 
-class TestThresholdConstants:
-    """Sanity check: vakioiden arvot vastaavat 2.3:n sääntöjä."""
+class TestClassifyStabilityProtocol:
+    """storage_T_C/storage_RH_percent + experimental_protocol -> protocol_match."""
 
-    def test_constants(self) -> None:
-        assert CLASS_I_MAX_DAYS == 7.0
-        assert CLASS_II_MAX_DAYS_ACCELERATED == 180.0
-        assert CLASS_III_MIN_DAYS_AMBIENT == 365.0
-        assert 0 < BORDERLINE_FRACTION < 0.5
+    def test_ich_q1a_accelerated_exact(self) -> None:
+        assert classify_stability_protocol(40.0, 75.0) == "ich_q1a_accelerated"
 
+    def test_ich_q1a_accelerated_loose_tolerance(self) -> None:
+        # 38 °C / 73 % RH -> edelleen kiihdytetty (väljä toleranssi).
+        assert classify_stability_protocol(38.0, 73.0) == "ich_q1a_accelerated"
+        assert classify_stability_protocol(45.0, 80.0) == "ich_q1a_accelerated"
 
-class TestDryShortTermProtocol:
-    """Kuivasäilytys (P2O5 / silica gel, RH ≈ 0 %).
+    def test_ich_q1a_long_term_exact(self) -> None:
+        assert classify_stability_protocol(25.0, 60.0) == "ich_q1a_long_term"
 
-    MIKSI nämä testit: monet H1:n lähteet (mm. Löbmann 2011) eivät käytä
-    ICH Q1A -protokollaa, vaan kuivakokeita 4-25 °C:ssa noin 21 vrk:n ajan.
-    Tämä haara mahdollistaa tällaisten lähteiden luokituksen ja varmistaa,
-    että label_confidence pysyy 'low':na ei-standardiksi tunnistetussa
-    protokollassa.
-    """
+    def test_dry_silica_gel_is_non_standard(self) -> None:
+        # Kuiva (RH ≈ 0 %) ilman eksplisiittistä dry_short_term-merkkiä
+        # luokitellaan non_standardiksi — kuivakokeen kesto ja tulkinta
+        # vaihtelee, joten ekstraktoijan on oltava eksplisiittinen.
+        assert classify_stability_protocol(4.0, 0.0) == "non_standard"
+        assert classify_stability_protocol(25.0, 0.0) == "non_standard"
 
-    def test_dry_short_term_censored_long(self) -> None:
-        # 21 vrk sensuroituna kuivassa: ei kiteytymistä havaittu pitkän
-        # ajan kuluessa -> todennäköisesti Class III, mutta ei-standardin
-        # protokollan vuoksi 'low' confidence.
-        gfa, conf = classify_baird_taylor(
-            21.0, 25.0, 0.0, False,
-            induction_time_censored=True,
-            experimental_protocol="dry_short_term",
-        )
-        assert gfa == 3
-        assert conf == "low"
-
-    def test_dry_short_term_censored_medium(self) -> None:
-        # 10 vrk sensuroituna kuivassa: välilukema (>= 7 mutta < 14)
-        # -> luultavasti Class II, low confidence.
-        gfa, conf = classify_baird_taylor(
-            10.0, 25.0, 0.0, False,
-            induction_time_censored=True,
-            experimental_protocol="dry_short_term",
-        )
-        assert gfa == 2
-        assert conf == "low"
-
-    def test_dry_short_term_observed_crystallization(self) -> None:
-        # 15 vrk havaittu kiteytyminen kuivassa: kesti vähintään viikon
-        # -> Class II, low confidence.
-        gfa, conf = classify_baird_taylor(
-            15.0, 25.0, 0.0, False,
-            induction_time_censored=False,
-            experimental_protocol="dry_short_term",
-        )
-        assert gfa == 2
-        assert conf == "low"
-
-    def test_dry_short_term_fast_crystallization(self) -> None:
-        # 3 vrk havaittu kiteytyminen kuivassa: nopea kiteytyminen jopa
-        # kuivassakin viittaa Class I:een.
-        gfa, conf = classify_baird_taylor(
-            3.0, 25.0, 0.0, False,
-            induction_time_censored=False,
-            experimental_protocol="dry_short_term",
-        )
-        assert gfa == 1
-        assert conf == "low"
-
-    def test_dry_short_term_censored_below_threshold_returns_none(self) -> None:
-        # Sensuroitu < 7 vrk kuivassa: koe loppui liian aikaisin
-        # -> ei voi luokitella.
-        gfa, conf = classify_baird_taylor(
-            5.0, 25.0, 0.0, False,
-            induction_time_censored=True,
-            experimental_protocol="dry_short_term",
-        )
-        assert gfa is None
-        assert conf == "low"
-
-
-class TestTgPlus15KProtocol:
-    """Tg+15 K -kineettinen testi (Class I:n alkuperäinen määrittely)."""
-
-    def test_tg_plus_15K_class_i(self) -> None:
-        # < 7 vrk Tg+15 K:ssa = Class I:n suora todiste, high confidence.
-        gfa, conf = classify_baird_taylor(
-            5.0, None, None, False,
-            experimental_protocol="tg_plus_15K",
-        )
-        assert gfa == 1
-        assert conf == "high"
-
-    def test_tg_plus_15K_not_class_i(self) -> None:
-        # >= 7 vrk Tg+15 K:ssa: ei Class I, mutta tarkkaa II/III-luokkaa
-        # ei voi päätellä tästä testistä yksin -> (2, 'low').
-        gfa, conf = classify_baird_taylor(
-            10.0, None, None, False,
-            experimental_protocol="tg_plus_15K",
-        )
-        assert gfa == 2
-        assert conf == "low"
-
-
-class TestProtocolMaxDuration:
-    """protocol_max_duration_days -johdonmukaisuustarkistus."""
-
-    def test_protocol_duration_consistency_raises(self) -> None:
-        # Sensuroitu havainto > kokeen kesto on mahdoton -> ValueError.
-        with pytest.raises(ValueError, match="protocol_max_duration_days"):
-            classify_baird_taylor(
-                30.0, 40.0, 75.0, False,
-                induction_time_censored=True,
-                protocol_max_duration_days=21.0,
+    def test_explicit_protocol_overrides(self) -> None:
+        # Eksplisiittinen experimental_protocol ohittaa olojen päättelyn.
+        assert (
+            classify_stability_protocol(
+                4.0, 0.0, experimental_protocol="dry_short_term"
             )
-
-    def test_protocol_duration_within_bounds_passes(self) -> None:
-        # 21 vrk sensuroituna kun kokeen maksimi on 21 vrk: OK.
-        gfa, conf = classify_baird_taylor(
-            21.0, 25.0, 0.0, False,
-            induction_time_censored=True,
-            experimental_protocol="dry_short_term",
-            protocol_max_duration_days=21.0,
+            == "dry_short_term"
         )
-        assert gfa == 3
-        assert conf == "low"
-
-    def test_protocol_duration_only_checked_when_censored(self) -> None:
-        # Sensuroimaton havainto voi periaatteessa ylittää sammuneen kokeen
-        # keston (esim. retrospektiivinen analyysi), joten tarkistus ei
-        # päde sille.
-        gfa, _ = classify_baird_taylor(
-            30.0, 40.0, 75.0, False,
-            induction_time_censored=False,
-            protocol_max_duration_days=21.0,
+        # Vaikka olot olisivat 40/75, eksplisiittinen non_standard pysyy.
+        assert (
+            classify_stability_protocol(
+                40.0, 75.0, experimental_protocol="non_standard"
+            )
+            == "non_standard"
         )
-        # Ei nosta — havainto sallittu.
-        assert gfa == 2
 
-
-class TestNonStandardProtocol:
-    """non_standard pakottaa label_confidence='low' standardilogiikan jälkeen."""
-
-    def test_non_standard_class_iii_downgraded_to_low(self) -> None:
-        # 365 vrk 40/75 olisi normaalisti (3, 'high'), mutta non_standard
-        # -merkki pakottaa luottamuksen alas.
-        gfa, conf = classify_baird_taylor(
-            365.0, 40.0, 75.0, False,
-            experimental_protocol="non_standard",
+    def test_missing_conditions_with_protocol(self) -> None:
+        assert (
+            classify_stability_protocol(
+                None, None, experimental_protocol="tg_plus_15K"
+            )
+            == "tg_plus_15K"
         )
-        assert gfa == 3
-        assert conf == "low"
 
-    def test_class_iii_censored_unknown_protocol(self) -> None:
-        # MIKSI: Allesø 2009:n 1:1 NAP-CIM kesti 186 vrk amorfisena 4 °C / 0 % RH
-        # silica gel -desikkaattorissa (kuiva ja kylmä = lievempi olo kuin
-        # ICH 40/75). Kokeilu loppui ilman havaittua kiteytymistä
-        # (induction_time_censored=True). Aiempi logiikka palautti
-        # (None, 'low') koska olot eivät täsmää 40/75:tä eikä 25/60:tä.
-        # Uusi haara tunnistaa sensuroidun >=180 vrk havainnon Class III:ksi
-        # mutta low confidence -painokertoimella.
-        gfa, conf = classify_baird_taylor(
-            186.0, 4.0, 0.0, False,
-            induction_time_censored=True,
-            experimental_protocol="non_standard",
+    def test_missing_conditions_without_protocol(self) -> None:
+        assert classify_stability_protocol(None, None) == "non_standard"
+
+    def test_unknown_protocol_string_falls_back_to_conditions(self) -> None:
+        # Tuntematon protokollamerkki ei kuulu enumiin -> päätellään oloista.
+        assert (
+            classify_stability_protocol(
+                40.0, 75.0, experimental_protocol="not_in_enum"
+            )
+            == "ich_q1a_accelerated"
         )
-        assert gfa == 3
-        assert conf == "low"
 
-    def test_class_iii_censored_dry_extended(self) -> None:
-        # Pidempi sensuroitu koe (200 vrk) kuivassa huoneenlämmössä
-        # (25 °C / 0 % RH). Sensuroitu vahvistaa "ei kiteytymistä >= 180 vrk"
-        # -kriteerin, mutta kuiva olo on lievempi kuin 40/75 -> (3, 'low').
-        gfa, conf = classify_baird_taylor(
-            200.0, 25.0, 0.0, False,
-            induction_time_censored=True,
-            experimental_protocol="non_standard",
-        )
-        assert gfa == 3
-        assert conf == "low"
-
-    def test_class_iii_censored_unknown_conditions_no_protocol(self) -> None:
-        # Sama haara laukeaa myös ilman eksplisiittistä non_standard-protokollaa,
-        # kunhan olot ovat tuntemattomat ja induction_time_censored=True.
-        # Tämä on tärkeää, koska aiempi semantiikka palautti (None, 'low')
-        # tässä tapauksessa, ja uusi haara muuttaa sen (3, 'low'):ksi.
-        gfa, conf = classify_baird_taylor(
-            186.0, None, None, False,
-            induction_time_censored=True,
-        )
-        assert gfa == 3
-        assert conf == "low"
-
-    def test_class_iii_censored_below_180_in_unknown_conditions_unaffected(self) -> None:
-        # Sensuroitu < 180 vrk tuntemattomissa oloissa: uusi haara EI laukea.
-        # Vanha _classify_class_ii_zone-logiikka palauttaa (2, 'low').
-        # Tarkistetaan, ettei uusi haara ohita Class II -aluetta.
-        gfa, conf = classify_baird_taylor(
-            150.0, None, None, False,
-            induction_time_censored=True,
-        )
-        assert gfa == 2
-        assert conf == "low"
+    def test_intermediate_conditions_are_non_standard(self) -> None:
+        # 33 °C / 50 % RH on kummankin ICH-standardin ulkopuolella
+        # (long-term: T<=30 ja RH 55-65; accelerated: T>=35 ja RH 70-80)
+        # -> non_standard.
+        assert classify_stability_protocol(33.0, 50.0) == "non_standard"
 
 
-class TestLegacyCompatibility:
-    """Vahvistus: nykyiset kutsut ilman uusia parametreja toimivat ennallaan.
+# =============================================================================
+# Stabiilisuusluokituksen luotettavuus
+# =============================================================================
 
-    Tämä testi on vakuutus regressioita vastaan: kun lisäsimme uudet
-    parametrit (experimental_protocol, protocol_max_duration_days), niiden
-    oletusarvojen täytyy säilyttää aiempi käyttäytyminen.
-    """
+
+class TestClassifyStabilityLabelConfidence:
+    """ICH Q1A -protokollat -> 'high', muut -> 'low'."""
 
     @pytest.mark.parametrize(
-        ("t", "T_C", "RH", "expected_gfa", "expected_conf"),
+        ("protocol_match", "expected"),
         [
-            (3.0, 40.0, 75.0, 1, "high"),
-            (60.0, 40.0, 75.0, 2, "high"),
-            (180.0, 40.0, 75.0, 3, "borderline"),
-            (250.0, 40.0, 75.0, 3, "high"),
-            (500.0, 25.0, 60.0, 3, "high"),
+            ("ich_q1a_accelerated", "high"),
+            ("ich_q1a_long_term", "high"),
+            ("dry_short_term", "low"),
+            ("tg_plus_15K", "low"),
+            ("dsc_in_situ", "low"),
+            ("non_standard", "low"),
         ],
     )
-    def test_no_protocol_param_matches_legacy(
-        self, t: float, T_C: float, RH: float,
-        expected_gfa: int, expected_conf: str,
-    ) -> None:
-        # Kutsutaan ilman experimental_protocol- ja protocol_max_duration_days
-        # -parametreja: tuloksen pitää olla sama kuin ennen muutosta.
-        gfa, conf = classify_baird_taylor(t, T_C, RH, False)
-        assert gfa == expected_gfa
-        assert conf == expected_conf
+    def test_confidence_mapping(self, protocol_match: str, expected: str) -> None:
+        assert (
+            classify_stability_label_confidence(protocol_match=protocol_match)
+            == expected
+        )
+
+    def test_extra_experimental_protocol_is_ignored(self) -> None:
+        # Funktio dokumentoi, että experimental_protocol-parametri otetaan
+        # vastaan mutta päätös tehdään protocol_match-arvon perusteella.
+        assert (
+            classify_stability_label_confidence(
+                protocol_match="ich_q1a_accelerated",
+                experimental_protocol="non_standard",
+            )
+            == "high"
+        )

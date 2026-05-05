@@ -116,6 +116,14 @@ class RawPair(BaseModel):
     storage_T_C: Optional[float] = None
     storage_RH_percent: Optional[float] = Field(None, ge=0, le=100)
     crystallizes_on_dsc_cooling: Optional[bool] = None
+    # Uudelleenlämmityssyklin havainto Baird et al. 2010 -GFA-luokituksessa.
+    # Ekstraktoija täyttää, jos artikkeli raportoi koko DSC-syklin
+    # (heating-cooling-reheating). None = ei raportoitu.
+    crystallizes_on_dsc_reheating: Optional[bool] = None
+    # Jos artikkeli ilmoittaa GFA-luokan suoraan (esim. "Class II glass former")
+    # mutta DSC-syklin yksityiskohtia ei ekstraktoida, tämä kenttä toimii
+    # viimekätisenä tietolähteenä classify_gfa_dsc-funktiolle.
+    paper_states_gfa_class: Optional[Literal[1, 2, 3]] = None
     experimental_protocol: Optional[ExperimentalProtocol] = None
     protocol_max_duration_days: Optional[float] = Field(None, ge=0)
 

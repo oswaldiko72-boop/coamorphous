@@ -6,7 +6,10 @@ MIKSI tämä moduuli on olemassa
 vaatii lisäksi:
 
 * kanoniset SMILES ja InChIKey (lasketaan PubChem-hausta + RDKit:llä),
-* ``gfa_class`` ja ``label_confidence`` (``classify_baird_taylor``),
+* ``gfa_class_dsc``, ``gfa_dsc_evidence`` ja ``gfa_label_confidence``
+  (``classify_gfa_dsc``),
+* ``stability_week_bin``, ``stability_protocol_match`` ja
+  ``stability_label_confidence`` (vastaavat ``classify_stability_*``-funktiot),
 * lähdemetadata (DOI, kirjailija, vuosi, ekstraktiopäivä),
 * pari-ID juoksevasti.
 
@@ -28,7 +31,12 @@ from datetime import date
 from typing import Optional
 
 from coamorphous.corpus.canonicalize import inchikey_from_smiles, safe_canonical
-from coamorphous.corpus.classify import classify_baird_taylor
+from coamorphous.corpus.classify import (
+    classify_gfa_dsc,
+    classify_stability_label_confidence,
+    classify_stability_protocol,
+    classify_stability_week_bin,
+)
 from coamorphous.extraction.extraction_schema import RawPair
 from coamorphous.extraction.pubchem_lookup import (
     PubChemError,
@@ -125,27 +133,58 @@ def canonicalize_pair(raw_dict: dict) -> dict:
     return out
 
 
-def compute_classification(raw: RawPair) -> tuple[Optional[int], str]:
-    """Aja ``classify_baird_taylor`` ``RawPair``-objektin tiedoilla.
+def compute_classification(raw: RawPair) -> dict:
+    """Aja kaikki neljä luokitusta ``RawPair``-objektin tiedoilla.
 
-    Tämä funktio on yksinkertainen kääre, joka olemassa siksi, että:
+    Yhdistää GFA-luokituksen (DSC-pohjainen) ja stabiilisuusluokituksen
+    (säilytysprotokollan match + viikkobini + label_confidence) yhteen
+    sanakirjaan. Erotettu omaksi funktioksi, jotta:
 
-    * testit voivat varmistaa luokituslogiikan kutsutun oikeilla parametreilla,
+    * testit voivat varmistaa, että luokitukset kutsutaan oikeilla parametreilla,
     * ekstraktiopipelinen "luokitus" -vaihe on yksi nimetty toiminto.
 
     Älä koskaan kovakoodaa luokituksia ekstraktiossa — kutsu aina tätä
-    funktiota, jolloin uudelleenajot tuottavat aina yhtenäiset tulokset
+    funktiota, jolloin uudelleenajot tuottavat yhtenäiset tulokset
     luokituslogiikan päivitysten kanssa.
+
+    Returns
+    -------
+    dict
+        Avaimet: ``gfa_class_dsc``, ``gfa_label_confidence``,
+        ``gfa_dsc_evidence``, ``stability_week_bin``,
+        ``stability_protocol_match``, ``stability_label_confidence``.
     """
-    return classify_baird_taylor(
+    # classify_gfa_dsc johtaa evidence-arvon itse syöttötiedoista —
+    # ekstraktiokoodi välittää vain raakatiedot eikä yritä päätellä
+    # evidence-merkkiä etukäteen.
+    gfa_class, gfa_conf, gfa_evidence = classify_gfa_dsc(
+        crystallizes_on_cooling=raw.crystallizes_on_dsc_cooling,
+        crystallizes_on_reheating=raw.crystallizes_on_dsc_reheating,
+        paper_states_class=raw.paper_states_gfa_class,
+    )
+
+    week_bin = classify_stability_week_bin(
         induction_time_days=raw.induction_time_days,
+        induction_time_censored=raw.induction_time_censored,
+    )
+    protocol_match = classify_stability_protocol(
         storage_T_C=raw.storage_T_C,
         storage_RH_percent=raw.storage_RH_percent,
-        crystallizes_on_dsc_cooling=raw.crystallizes_on_dsc_cooling,
-        induction_time_censored=raw.induction_time_censored,
         experimental_protocol=raw.experimental_protocol,
-        protocol_max_duration_days=raw.protocol_max_duration_days,
     )
+    stability_conf = classify_stability_label_confidence(
+        protocol_match=protocol_match,
+        experimental_protocol=raw.experimental_protocol,
+    )
+
+    return {
+        "gfa_class_dsc": gfa_class,
+        "gfa_label_confidence": gfa_conf,
+        "gfa_dsc_evidence": gfa_evidence,
+        "stability_week_bin": week_bin,
+        "stability_protocol_match": protocol_match,
+        "stability_label_confidence": stability_conf,
+    }
 
 
 def raw_pair_to_master_row(
@@ -191,8 +230,8 @@ def raw_pair_to_master_row(
         }
     )
 
-    # 3) Luokitus.
-    gfa, conf = compute_classification(raw)
+    # 3) Luokitus — kahdeksi erilliseksi kohdemuuttujaksi (GFA, stability).
+    classifications = compute_classification(raw)
 
     # 4) Notes-kenttä: yhdistetään LLM:n notes ja review_reasons,
     # jotta auditoinnissa kaikki epävarmuudet ovat yhdellä rivillä näkyvissä.
@@ -228,9 +267,13 @@ def raw_pair_to_master_row(
         "process_method": raw.process_method,
         "process_details": raw.process_details,
         # C. KOHDEMUUTTUJAT
-        "gfa_class": gfa,
-        "gfa_class_label": gfa_label_from_class(gfa),
-        "label_confidence": conf,
+        "gfa_class_dsc": classifications["gfa_class_dsc"],
+        "gfa_class_label": gfa_label_from_class(classifications["gfa_class_dsc"]),
+        "gfa_dsc_evidence": classifications["gfa_dsc_evidence"],
+        "gfa_label_confidence": classifications["gfa_label_confidence"],
+        "stability_week_bin": classifications["stability_week_bin"],
+        "stability_protocol_match": classifications["stability_protocol_match"],
+        "stability_label_confidence": classifications["stability_label_confidence"],
         "induction_time_days": raw.induction_time_days,
         "induction_time_censored": raw.induction_time_censored,
         "storage_T_C": raw.storage_T_C,

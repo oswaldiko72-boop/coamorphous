@@ -45,6 +45,9 @@ data/raw/*.xlsx
 data/processed/*.parquet
 data/external/*.cache
 
+# Vaihe 1 -ekstraktion väliaikaiset prompt-tiedostot (regeneroidaan notebookista)
+data/interim/*_prompt.txt
+
 # Logit ja salaisuudet
 *.log
 .env

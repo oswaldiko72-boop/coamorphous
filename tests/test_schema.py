@@ -57,9 +57,13 @@ def valid_row() -> dict:
         "ratio_reported_as": "mole_fraction",
         "process_method": "melt_quench",
         "process_details": None,
-        "gfa_class": 3,
+        "gfa_class_dsc": 3,
         "gfa_class_label": "Class III",
-        "label_confidence": "high",
+        "gfa_dsc_evidence": "dsc_cycle_full_reported",
+        "gfa_label_confidence": "high",
+        "stability_week_bin": "6-7m",
+        "stability_protocol_match": "ich_q1a_accelerated",
+        "stability_label_confidence": "high",
         "induction_time_days": 200.0,
         "induction_time_censored": False,
         "storage_T_C": 40.0,
@@ -159,7 +163,7 @@ class TestSchemaValidation:
 
     def test_invalid_gfa_class_fails(self, schema, valid_row: dict) -> None:
         bad_row = dict(valid_row)
-        bad_row["gfa_class"] = 4  # vain 1/2/3 sallittu
+        bad_row["gfa_class_dsc"] = 4  # vain 1/2/3 sallittu
         df = pd.DataFrame([bad_row])
         with pytest.raises((pa_errors.SchemaError, pa_errors.SchemaErrors)):
             schema.validate(df, lazy=True)

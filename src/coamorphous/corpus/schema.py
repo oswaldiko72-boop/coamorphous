@@ -40,9 +40,17 @@ logger = logging.getLogger(__name__)
 # MIKSI eksplisiittinen kartta: Pandera tukee monia kirjoitustapoja
 # (esim. "string", str, "object"), ja haluamme yhden virallisen mapping-tavan
 # joka helpottaa skeeman lukemista ihmiselle.
+#
+# MIKSI int -> "Int64" (pandasin nullable integer) eikä pa.Int64:
+# pa.Int64 on numpy-int64 joka EI voi sisältää None/NaN-arvoja, vaikka Panderan
+# nullable=True olisi asetettu. Pandasin "Int64" (capital I) on natiivisti
+# nullable. Koska osa korpuksen integer-sarakkeista (esim. gfa_class_dsc) voi
+# olla legitiimisti tuntematon — kun lähde ei raportoi DSC-sykliä eikä luokkaa
+# eksplisiittisesti — käytetään Int64:ää koko skeemassa. Source_year ja muut
+# ei-nullable intit pysyvät silti validina (nullable=False estää None-arvot).
 _DTYPE_MAP: Dict[str, Any] = {
     "string": pa.String,
-    "int": pa.Int64,
+    "int": "Int64",
     "float": pa.Float64,
     "bool": pa.Bool,
 }
