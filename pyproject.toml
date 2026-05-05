@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coamorphous"
+version = "0.1.0"
+description = "Co-amorphous drug stability prediction by combining MD and ML"
+requires-python = ">=3.11"
+authors = [
+    {name = "Per H."}
+]
+readme = "README.md"
+license = {text = "MIT"}
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "rdkit>=2024.0",
+    "pandera>=0.20",
+    "pyyaml>=6.0",
+    "pyarrow>=14.0",
+    "requests>=2.31",
+    "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "ipykernel",
+    "jupyter",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["coamorphous*"]
+
+[tool.setuptools.package-data]
+coamorphous = ["py.typed"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra -q"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/**/*.ipynb" = ["E402", "F401"]
+"tests/**/*.py" = ["B011"]
