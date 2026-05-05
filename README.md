@@ -114,4 +114,3 @@ Baird, J. A. & Taylor, L. S. *Adv. Drug Deliv. Rev.* **64** (2012) 396–421.
 ## Lisenssi
 
 MIT.
-# coamorphous
