@@ -52,6 +52,8 @@ def valid_row() -> dict:
         "drug_B_cas": None,
         "mole_fraction_A": 0.5,
         "mole_fraction_B": 0.5,
+        "mole_fraction_A_raw": 0.5,
+        "mole_fraction_B_raw": 0.5,
         "weight_fraction_A": None,
         "weight_fraction_B": None,
         "ratio_reported_as": "mole_fraction",

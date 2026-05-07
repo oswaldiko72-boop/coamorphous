@@ -217,6 +217,26 @@ columns:
     nullable: true
     ge: 0.0
     le: 1.0
+  # Alkuperäiset (snäppäämättömät) molisuhteet auditointia varten. Ne
+  # täytetään merge-vaiheessa harmonize_mole_fractions-funktiolla; interim-
+  # ekstraktiot eivät kirjoita näitä sarakkeita itse. Merge yhtenäistää eri
+  # tarkkuudella raportoidut suhteet (esim. 0.667 ja 0.6667 -> 0.6667 = 2/3),
+  # mutta säilyttää massapainotetut tarkkat arvot kuten 0.506 ennallaan.
+  mole_fraction_A_raw:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+    description: >
+      Alkuperäinen mole_fraction_A ennen snäppäystä yksinkertaiseen suhteeseen.
+      Sama kuin mole_fraction_A jos arvo ei lähestynyt yhtään p/q-suhdetta.
+  mole_fraction_B_raw:
+    dtype: float
+    nullable: true
+    ge: 0.0
+    le: 1.0
+    description: >
+      Alkuperäinen mole_fraction_B ennen snäppäystä.
   weight_fraction_A:
     dtype: float
     nullable: true
