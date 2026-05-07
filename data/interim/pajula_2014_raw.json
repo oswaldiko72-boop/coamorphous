@@ -19,9 +19,9 @@
     "paper_states_gfa_class": null,
     "experimental_protocol": "above_tg_kinetic",
     "protocol_max_duration_days": null,
-    "Tg_K": 328.75,
-    "Tg_uncertainty_K": null,
-    "Tg_heating_rate_K_min": 2.0,
+    "Tg_K": 326.15,
+    "Tg_uncertainty_K": 0.3,
+    "Tg_heating_rate_K_min": 10.0,
     "Tm_A_K": 422.05,
     "Tm_B_K": 442.25,
     "pxrd_amorphous": null,
@@ -31,8 +31,8 @@
     "notes": "Storage above Tg (T_s = Tg + 0.3*(Tm50:50 - Tg)). Crystallization detected by DSC after 5 weeks (melting endotherm at 132 °C). Phase separation detected by FT-IRi after 1 day.",
     "needs_review": true,
     "review_reasons": [
-      "Pair-Tg from Table 3 (TMDSC TOPEM, 2 K/min underlying), not standard DSC 10 K/min. Pure component Tg values in Table 2 are at 10 K/min but not used for pair-Tg field per schema. Pajula 2014 is the only paper in corpus with TMDSC-only pair-Tg measurement.",
-      "DSC H/C/H cycle for GFA classification was NOT performed. Second heating ended at storage temperature, not above Tm. Therefore crystallizes_on_dsc_cooling and crystallizes_on_dsc_reheating set to null (measurement not performed for Class 1/2/3 assessment), and gfa_class_dsc should remain null. Pajula 2014 used DSC only for sample preparation, not for Baird et al. 2010 GFA classification."
+      "DSC H/C/H cycle for GFA classification was NOT performed. Second heating ended at storage temperature, not above Tm. Therefore crystallizes_on_dsc_cooling and crystallizes_on_dsc_reheating set to null (measurement not performed for Class 1/2/3 assessment), and gfa_class_dsc should remain null. Pajula 2014 used DSC only for sample preparation, not for Baird et al. 2010 GFA classification.",
+      "Tg updated from Kilpelainen et al. 2020 (DOI: 10.1016/j.ejpb.2020.08.007), Table 2, DSC 10 K/min, n=3, replacing Pajula 2014 TMDSC value. Three pairs in Pajula 2014 (terfenadine-paracetamol, terfenadine-indomethacin, indomethacin-paracetamol) were re-measured by Kilpelainen 2020 with standard DSC 10 K/min, enabling cross-corpus consistency."
     ]
   },
   {
@@ -55,9 +55,9 @@
     "paper_states_gfa_class": null,
     "experimental_protocol": "above_tg_kinetic",
     "protocol_max_duration_days": 147.0,
-    "Tg_K": 350.25,
-    "Tg_uncertainty_K": null,
-    "Tg_heating_rate_K_min": 2.0,
+    "Tg_K": 353.65,
+    "Tg_uncertainty_K": 1.0,
+    "Tg_heating_rate_K_min": 10.0,
     "Tm_A_K": 422.05,
     "Tm_B_K": 433.25,
     "pxrd_amorphous": null,
@@ -67,8 +67,8 @@
     "notes": "Censored: 21 weeks (147 days) without crystallization detected by PLM. FT-IRi indicated two partly separated phases after 9 days.",
     "needs_review": true,
     "review_reasons": [
-      "Pair-Tg from Table 3 (TMDSC TOPEM, 2 K/min underlying), not standard DSC 10 K/min. Pure component Tg values in Table 2 are at 10 K/min but not used for pair-Tg field per schema. Pajula 2014 is the only paper in corpus with TMDSC-only pair-Tg measurement.",
-      "DSC H/C/H cycle for GFA classification was NOT performed. Second heating ended at storage temperature, not above Tm. Therefore crystallizes_on_dsc_cooling and crystallizes_on_dsc_reheating set to null (measurement not performed for Class 1/2/3 assessment), and gfa_class_dsc should remain null. Pajula 2014 used DSC only for sample preparation, not for Baird et al. 2010 GFA classification."
+      "DSC H/C/H cycle for GFA classification was NOT performed. Second heating ended at storage temperature, not above Tm. Therefore crystallizes_on_dsc_cooling and crystallizes_on_dsc_reheating set to null (measurement not performed for Class 1/2/3 assessment), and gfa_class_dsc should remain null. Pajula 2014 used DSC only for sample preparation, not for Baird et al. 2010 GFA classification.",
+      "Tg updated from Kilpelainen et al. 2020 (DOI: 10.1016/j.ejpb.2020.08.007), Table 2, DSC 10 K/min, n=3, replacing Pajula 2014 TMDSC value. Three pairs in Pajula 2014 (terfenadine-paracetamol, terfenadine-indomethacin, indomethacin-paracetamol) were re-measured by Kilpelainen 2020 with standard DSC 10 K/min, enabling cross-corpus consistency."
     ]
   },
   {
@@ -127,9 +127,9 @@
     "paper_states_gfa_class": null,
     "experimental_protocol": "above_tg_kinetic",
     "protocol_max_duration_days": null,
-    "Tg_K": 308.95,
-    "Tg_uncertainty_K": null,
-    "Tg_heating_rate_K_min": 2.0,
+    "Tg_K": 306.55,
+    "Tg_uncertainty_K": 0.3,
+    "Tg_heating_rate_K_min": 10.0,
     "Tm_A_K": 433.25,
     "Tm_B_K": 442.25,
     "pxrd_amorphous": null,
@@ -140,8 +140,8 @@
     "needs_review": true,
     "review_reasons": [
       "Pair Tg after 5 weeks of storage (25.2 °C) is within 1 K of pure paracetamol Tg (24.3 °C), indicating phase separation/crystallization rather than a co-amorphous state at the 5-week timepoint (initial Tg = 35.8 °C is between pure components and acceptable).",
-      "Pair-Tg from Table 3 (TMDSC TOPEM, 2 K/min underlying), not standard DSC 10 K/min. Pure component Tg values in Table 2 are at 10 K/min but not used for pair-Tg field per schema. Pajula 2014 is the only paper in corpus with TMDSC-only pair-Tg measurement.",
-      "DSC H/C/H cycle for GFA classification was NOT performed. Second heating ended at storage temperature, not above Tm. Therefore crystallizes_on_dsc_cooling and crystallizes_on_dsc_reheating set to null (measurement not performed for Class 1/2/3 assessment), and gfa_class_dsc should remain null. Pajula 2014 used DSC only for sample preparation, not for Baird et al. 2010 GFA classification."
+      "DSC H/C/H cycle for GFA classification was NOT performed. Second heating ended at storage temperature, not above Tm. Therefore crystallizes_on_dsc_cooling and crystallizes_on_dsc_reheating set to null (measurement not performed for Class 1/2/3 assessment), and gfa_class_dsc should remain null. Pajula 2014 used DSC only for sample preparation, not for Baird et al. 2010 GFA classification.",
+      "Tg updated from Kilpelainen et al. 2020 (DOI: 10.1016/j.ejpb.2020.08.007), Table 2, DSC 10 K/min, n=3, replacing Pajula 2014 TMDSC value. Three pairs in Pajula 2014 (terfenadine-paracetamol, terfenadine-indomethacin, indomethacin-paracetamol) were re-measured by Kilpelainen 2020 with standard DSC 10 K/min, enabling cross-corpus consistency."
     ]
   },
   {
