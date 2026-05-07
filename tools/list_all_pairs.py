@@ -1,11 +1,26 @@
 """
 Listaa kaikki binäärikorpuksen parit kaikista CSV-tiedostoista.
+Tukee sekä pilkku- (',') että puolipiste-erotinta (';').
 
 Käyttö: python tools/list_all_pairs.py
 """
 from pathlib import Path
 
 import pandas as pd
+
+
+def read_csv_smart(path: Path) -> pd.DataFrame:
+    """Lue CSV automaattisesti tunnistaen erottimen (',', ';')."""
+    # Lue ensimmäinen rivi paljastamaan erotin
+    with path.open("r", encoding="utf-8") as f:
+        first_line = f.readline()
+    
+    if ";" in first_line and first_line.count(";") > first_line.count(","):
+        sep = ";"
+    else:
+        sep = ","
+    
+    return pd.read_csv(path, sep=sep, low_memory=False)
 
 
 def main() -> int:
@@ -24,9 +39,14 @@ def main() -> int:
     print(f"{'='*100}")
 
     for f in files:
-        df = pd.read_csv(f)
+        try:
+            df = read_csv_smart(f)
+        except Exception as e:
+            print(f"\n[VIRHE] {f.name}: {e}")
+            continue
+        
         status = "PROCESSED" if "processed" in str(f) else "INTERIM"
-        print(f"\n[{status}] {f.name} ({len(df)} pairs)")
+        print(f"\n[{status}] {f.name} ({len(df)} pairs, {len(df.columns)} columns)")
         print(f"{'-'*100}")
 
         cols = [
