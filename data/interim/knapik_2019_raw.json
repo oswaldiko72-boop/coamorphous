@@ -54,7 +54,7 @@
     "crystallizes_on_dsc_cooling": false,
     "crystallizes_on_dsc_reheating": false,
     "paper_states_gfa_class": null,
-    "experimental_protocol": "non_standard",
+    "experimental_protocol": "above_tg_kinetic",
     "protocol_max_duration_days": 1.25,
     "Tg_K": 323.0,
     "Tg_uncertainty_K": null,

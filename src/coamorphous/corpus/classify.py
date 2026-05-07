@@ -91,9 +91,17 @@ ALLOWED_PROTOCOLS: frozenset[str] = frozenset(
         "dry_short_term",
         "tg_plus_15K",
         "dsc_in_situ",
+        "above_tg_kinetic",
         "non_standard",
     }
 )
+
+# Kynnys above_tg_kinetic-tunnistukselle: jos säilytys-T on yli Tg + 15 K,
+# kyseessä on kineettinen kiteytymiskoe (BDS, isothermal DSC) eikä
+# pitkäaikainen säilyvyyskoe — Baird-Taylor (2012) ICH Q1A -konsensus ei
+# kata tällaisia oloja. Raja on EKSKLUUSIIVINEN: tasan Tg+15 K -mittaus
+# on yhä tg_plus_15K-rajatapaus, vasta yli sen menee above_tg_kinetic:ksi.
+ABOVE_TG_DELTA_K: float = 15.0
 
 # -----------------------------------------------------------------------------
 # Stabiilisuusajan binitys (induction_time_days -> stability_week_bin).
@@ -328,13 +336,24 @@ def classify_stability_week_bin(
 def classify_stability_protocol(
     storage_T_C: Optional[float],
     storage_RH_percent: Optional[float],
+    Tg_K: Optional[float] = None,
     experimental_protocol: Optional[str] = None,
 ) -> str:
     """Tunnista, mitä standardiprotokollatyyppiä säilytysolot vastaavat.
 
-    Jos ``experimental_protocol`` on annettu eksplisiittisesti ja se on
-    sallittu enum-arvo, palautetaan se sellaisenaan (kutsuva ekstraktoija
-    on tehnyt päätöksen). Muuten päätellään storage_T_C/storage_RH-arvoista.
+    Prioriteetti:
+
+    1. Jos ``storage_T_C`` ja ``Tg_K`` molemmat saatavilla ja
+       T > Tg + 15 K, palautetaan ``"above_tg_kinetic"`` riippumatta
+       ekstraktoijan ilmoituksesta. Tämä estää, että BDS:ssä tai
+       isotermisessä DSC:ssä mitattu kineettinen kiteytymiskoe
+       sekoitetaan ICH Q1A -tyyppiseen säilyvyyskokeeseen ML-mallin
+       opetuksessa. Olot Tg:n yläpuolella eivät ennusta käytännön
+       varastointistabiliteettia.
+    2. Jos ``experimental_protocol`` on annettu eksplisiittisesti ja se on
+       sallittu enum-arvo, palautetaan se sellaisenaan (kutsuva ekstraktoija
+       on tehnyt päätöksen).
+    3. Muuten päätellään storage_T_C/storage_RH-arvoista.
 
     Parameters
     ----------
@@ -342,25 +361,31 @@ def classify_stability_protocol(
         Säilytyslämpötila celsiuksina.
     storage_RH_percent : float, optional
         Suhteellinen kosteus prosentteina.
+    Tg_K : float, optional
+        Lasittumislämpötila kelvineinä. Jos saatavilla, käytetään
+        above_tg_kinetic-tunnistukseen vertailemalla
+        ``storage_T_K = storage_T_C + 273.15`` arvoon ``Tg_K + 15.0``.
+        Jos ``None``, ehto ohitetaan ja luokitus etenee normaalisti.
     experimental_protocol : str, optional
         Ekstraktoijan ilmoittama protokolla (``configs/corpus_schema.yaml``:n
-        ``experimental_protocol``-enum). Jos annettu, käytetään sellaisenaan.
+        ``experimental_protocol``-enum). Jos annettu, käytetään sellaisenaan
+        (paitsi above_tg_kinetic-ehto ohittaa myös tämän — datan eheys
+        prioriteetiltaan ekstraktoijan päätöksen yli).
 
     Returns
     -------
     str
         Yksi seuraavista: ``"ich_q1a_accelerated"``, ``"ich_q1a_long_term"``,
         ``"dry_short_term"``, ``"tg_plus_15K"``, ``"dsc_in_situ"``,
-        ``"non_standard"``.
+        ``"above_tg_kinetic"``, ``"non_standard"``.
 
     Notes
     -----
-    Pääsääntö: jos olot eivät täsmää ICH Q1A:n 40/75:ään tai 25/60:een
-    eikä eksplisiittistä protokollaa ole, palautetaan ``"non_standard"``.
-    Kuivasäilytys (RH <= 10 %) ilman eksplisiittistä protokollaa luokitellaan
-    ``"dry_short_term"``-ehdokkaaksi vain jos ekstraktoija on niin merkinnyt;
-    pelkkä matala RH ei riitä, koska lyhytaikainen vs. pitkäaikainen kuivakoe
-    eroavat tulkinnaltaan.
+    Pääsääntö (Tg-ehdon ulkopuolella): jos olot eivät täsmää ICH Q1A:n
+    40/75:ään tai 25/60:een eikä eksplisiittistä protokollaa ole,
+    palautetaan ``"non_standard"``. Kuivasäilytys (RH <= 10 %) ilman
+    eksplisiittistä protokollaa luokitellaan ``"dry_short_term"``-
+    ehdokkaaksi vain jos ekstraktoija on niin merkinnyt.
 
     Examples
     --------
@@ -372,13 +397,22 @@ def classify_stability_protocol(
     'non_standard'
     >>> classify_stability_protocol(None, None, experimental_protocol="dry_short_term")
     'dry_short_term'
+    >>> classify_stability_protocol(99.85, None, Tg_K=323.0)
+    'above_tg_kinetic'
     """
-    # Eksplisiittinen protokolla ohittaa olojen päättelyn, kunhan se on
+    # 1) above_tg_kinetic ohittaa kaiken muun: kineettinen koe Tg:n yläpuolella
+    # ei ole säilyvyyskoe, vaikka ekstraktoija olisi sen sellaiseksi merkinnyt.
+    if storage_T_C is not None and Tg_K is not None:
+        storage_T_K = storage_T_C + 273.15
+        if storage_T_K > Tg_K + ABOVE_TG_DELTA_K:
+            return "above_tg_kinetic"
+
+    # 2) Eksplisiittinen protokolla ohittaa olojen päättelyn, kunhan se on
     # sallittu enum-arvo.
     if experimental_protocol in ALLOWED_PROTOCOLS:
         return experimental_protocol
 
-    # Päättele oloista.
+    # 3) Päättele oloista.
     if storage_T_C is None or storage_RH_percent is None:
         return "non_standard"
 

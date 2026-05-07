@@ -170,6 +170,7 @@ def compute_classification(raw: RawPair) -> dict:
     protocol_match = classify_stability_protocol(
         storage_T_C=raw.storage_T_C,
         storage_RH_percent=raw.storage_RH_percent,
+        Tg_K=raw.Tg_K,
         experimental_protocol=raw.experimental_protocol,
     )
     stability_conf = classify_stability_label_confidence(

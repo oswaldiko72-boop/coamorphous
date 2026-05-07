@@ -128,6 +128,8 @@ enums:
                                # (esim. Löbmann 2011/2013, lyhyen aikavälin tutkimukset)
     - tg_plus_15K              # Tg+15 K kineettinen testi (Class I -määrittely)
     - dsc_in_situ              # DSC-jäähdytys/uudelleenlämmitys ainoa testi
+    - above_tg_kinetic         # T > Tg + 15 K, kineettinen kiteytymiskoe (BDS,
+                               # isothermal DSC). EI ole pitkäaikainen säilyvyyskoe.
     - non_standard             # muu, kuvaa process_details- tai notes-kentässä
 
 columns:
@@ -301,8 +303,10 @@ columns:
     enum: experimental_protocol
     description: >
       Mihin protokollatyyppiin storage_T_C/storage_RH_percent vastaa, kun
-      experimental_protocol on otettu huomioon. Käytetään
-      stability_label_confidence-arvon laskennassa.
+      experimental_protocol ja Tg_K on otettu huomioon. Käytetään
+      stability_label_confidence-arvon laskennassa. Erityistapaus
+      above_tg_kinetic = T > Tg + 15 K, kineettinen kiteytymiskoe (BDS,
+      isothermal DSC). EI ole pitkäaikainen säilyvyyskoe.
   stability_label_confidence:
     dtype: string
     nullable: true
@@ -421,7 +425,9 @@ columns:
     description: >
       Artikkelin raportoima protokollatunniste tai None. Käytetään
       stability_protocol_match-laskennassa: jos eksplisiittinen, otetaan
-      sellaisenaan; muutoin pääteltävä storage_T_C/storage_RH_percent-arvoista.
+      sellaisenaan; muutoin pääteltävä storage_T_C/storage_RH_percent- ja
+      Tg_K-arvoista. above_tg_kinetic = T > Tg + 15 K, kineettinen
+      kiteytymiskoe (BDS, isothermal DSC). EI ole pitkäaikainen säilyvyyskoe.
   protocol_max_duration_days:
     dtype: float
     nullable: true

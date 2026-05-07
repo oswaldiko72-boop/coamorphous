@@ -271,6 +271,82 @@ class TestClassifyStabilityProtocol:
         # -> non_standard.
         assert classify_stability_protocol(33.0, 50.0) == "non_standard"
 
+    # -------------------------------------------------------------------------
+    # above_tg_kinetic: T > Tg + 15 K -tunnistus.
+    # MIKSI tämä luokitus on tärkeä: Knapik 2019 ja vastaavat BDS-/isothermal
+    # DSC -kokeet mittaavat kineettistä kiteytymistä Tg:n yläpuolella, eivät
+    # käytännön varastointistabiliteettia. Jos näitä ei eroteta ICH-tyyppisistä
+    # säilyvyyskokeista, ML-malli oppii sekaannuksen.
+    # -------------------------------------------------------------------------
+
+    def test_above_tg_kinetic_50K_above(self) -> None:
+        # storage_T_K = 373 K (= 99.85 °C), Tg_K = 323 K -> ΔT = 50 K > 15 K.
+        # Ei RH:ta, ei eksplisiittistä protokollaa -> above_tg_kinetic.
+        # Vastaa Knapik 2019:n rivi _02 -tilannetta (EZB/SVS, T = Tg + 50 K).
+        assert (
+            classify_stability_protocol(
+                storage_T_C=99.85,  # = 373 K
+                storage_RH_percent=None,
+                Tg_K=323.0,
+                experimental_protocol=None,
+            )
+            == "above_tg_kinetic"
+        )
+
+    def test_above_tg_kinetic_just_above_15K_threshold(self) -> None:
+        # Raja on EKSKLUUSIIVINEN: tasan Tg + 15 K ei ole vielä
+        # above_tg_kinetic, mutta Tg + 16 K on.
+        # 339 K - 273.15 = 65.85 °C; Tg + 15 K = 338 K; 339 > 338 -> above_tg_kinetic.
+        assert (
+            classify_stability_protocol(
+                storage_T_C=65.85,  # = 339 K
+                storage_RH_percent=None,
+                Tg_K=323.0,
+            )
+            == "above_tg_kinetic"
+        )
+
+    def test_above_tg_kinetic_overrides_explicit_protocol(self) -> None:
+        # Datan eheys: jos olot ovat selvästi Tg:n yläpuolella, kineettistä koetta
+        # ei pidä luokitella ICH-protokollaksi vaikka ekstraktoija niin merkitsisi.
+        assert (
+            classify_stability_protocol(
+                storage_T_C=99.85,  # = 373 K
+                storage_RH_percent=None,
+                Tg_K=323.0,
+                experimental_protocol="ich_q1a_long_term",
+            )
+            == "above_tg_kinetic"
+        )
+
+    def test_below_tg_returns_other_protocol(self) -> None:
+        # storage_T_K = 298 K (= 24.85 °C), Tg_K = 323 K, RH = 60 % ->
+        # T on Tg:n alapuolella, normaali ICH long-term -säilyvyyskoe.
+        # Vastaa Knapik 2019:n rivi _01 -tilannetta.
+        assert (
+            classify_stability_protocol(
+                storage_T_C=24.85,  # = 298 K
+                storage_RH_percent=60.0,
+                Tg_K=323.0,
+            )
+            == "ich_q1a_long_term"
+        )
+
+    def test_no_tg_falls_back_to_other_logic(self) -> None:
+        # Jos Tg_K puuttuu, above_tg_kinetic-ehtoa ei voida arvioida ja
+        # luokitus etenee normaalisti (eksplisiittinen protokolla / olot).
+        # storage_T_K = 313 K = 39.85 °C, RH = 75 %, eksplisiittinen
+        # ich_q1a_accelerated -> palautetaan eksplisiittinen arvo.
+        assert (
+            classify_stability_protocol(
+                storage_T_C=39.85,  # = 313 K
+                storage_RH_percent=75.0,
+                Tg_K=None,
+                experimental_protocol="ich_q1a_accelerated",
+            )
+            == "ich_q1a_accelerated"
+        )
+
 
 # =============================================================================
 # Stabiilisuusluokituksen luotettavuus
@@ -288,6 +364,7 @@ class TestClassifyStabilityLabelConfidence:
             ("dry_short_term", "low"),
             ("tg_plus_15K", "low"),
             ("dsc_in_situ", "low"),
+            ("above_tg_kinetic", "low"),
             ("non_standard", "low"),
         ],
     )

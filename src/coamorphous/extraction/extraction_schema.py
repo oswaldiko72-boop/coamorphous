@@ -56,6 +56,7 @@ ExperimentalProtocol = Literal[
     "dry_short_term",
     "tg_plus_15K",
     "dsc_in_situ",
+    "above_tg_kinetic",
     "non_standard",
 ]
 
